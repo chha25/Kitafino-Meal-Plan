@@ -1,0 +1,11 @@
+{
+  "title": "Speiseplan",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Speiseplan",
+        "description": "Configure Kitafino access in a later setup step."
+      }
+    }
+  }
+}

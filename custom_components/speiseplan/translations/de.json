@@ -1,0 +1,11 @@
+{
+  "title": "Speiseplan",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Speiseplan einrichten",
+        "description": "Kitafino-Zugang wird in einem spaeteren Einrichtungsschritt konfiguriert."
+      }
+    }
+  }
+}

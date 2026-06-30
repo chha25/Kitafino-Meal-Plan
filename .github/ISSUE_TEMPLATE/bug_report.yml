@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a problem with the Speiseplan integration
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include real Kitafino credentials, cookies, account IDs, household data, raw Kitafino HTML, request bodies, or response bodies.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Home Assistant version, integration version, and sanitized error details.
+      placeholder: |
+        Home Assistant: 2026.6.4
+        Speiseplan: 0.1.0
+        Error class: parse_error
+    validations:
+      required: false
