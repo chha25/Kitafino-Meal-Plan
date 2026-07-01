@@ -9,6 +9,22 @@
           "username": "Kitafino username",
           "password": "Kitafino password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Update Kitafino credentials",
+        "description": "Kitafino rejected the stored credentials. Enter updated credentials to keep the existing integration entry.",
+        "data": {
+          "username": "Kitafino username",
+          "password": "Kitafino password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Kitafino credentials",
+        "description": "Update the Kitafino credentials stored in this existing integration entry.",
+        "data": {
+          "username": "Kitafino username",
+          "password": "Kitafino password"
+        }
       }
     },
     "error": {
@@ -17,7 +33,10 @@
       "unknown": "Unexpected validation error."
     },
     "abort": {
-      "already_configured": "Kitafino Meal Plan is already configured."
+      "already_configured": "Kitafino Meal Plan is already configured.",
+      "reauth_successful": "Kitafino credentials were updated successfully.",
+      "reconfigure_successful": "Kitafino Meal Plan was reconfigured successfully.",
+      "unique_id_mismatch": "The submitted credentials do not match this integration entry."
     }
   },
   "options": {

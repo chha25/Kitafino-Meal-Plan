@@ -9,6 +9,22 @@
           "username": "Kitafino-Benutzername",
           "password": "Kitafino-Passwort"
         }
+      },
+      "reauth_confirm": {
+        "title": "Kitafino-Zugangsdaten aktualisieren",
+        "description": "Kitafino hat die gespeicherten Zugangsdaten abgelehnt. Gib aktualisierte Zugangsdaten ein, um den bestehenden Integrationseintrag weiterzuverwenden.",
+        "data": {
+          "username": "Kitafino-Benutzername",
+          "password": "Kitafino-Passwort"
+        }
+      },
+      "reconfigure": {
+        "title": "Kitafino-Zugangsdaten neu konfigurieren",
+        "description": "Aktualisiere die Kitafino-Zugangsdaten, die in diesem bestehenden Integrationseintrag gespeichert sind.",
+        "data": {
+          "username": "Kitafino-Benutzername",
+          "password": "Kitafino-Passwort"
+        }
       }
     },
     "error": {
@@ -17,7 +33,10 @@
       "unknown": "Unerwarteter Validierungsfehler."
     },
     "abort": {
-      "already_configured": "Kitafino Meal Plan ist bereits eingerichtet."
+      "already_configured": "Kitafino Meal Plan ist bereits eingerichtet.",
+      "reauth_successful": "Kitafino-Zugangsdaten wurden erfolgreich aktualisiert.",
+      "reconfigure_successful": "Kitafino Meal Plan wurde erfolgreich neu konfiguriert.",
+      "unique_id_mismatch": "Die eingegebenen Zugangsdaten passen nicht zu diesem Integrationseintrag."
     }
   },
   "options": {

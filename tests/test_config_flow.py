@@ -20,6 +20,8 @@ from custom_components.speiseplan.const import (
 )
 from custom_components.speiseplan.config_flow import (
     async_validate_user_input,
+    async_validate_credential_update,
+    build_credential_update_schema,
     build_default_options,
     normalize_options_input,
     options_with_defaults,
@@ -161,6 +163,63 @@ def test_validation_errors_map_to_safe_form_errors(
 
     assert result.errors == {"base": expected_error}
     assert result.data == {}
+
+
+def test_successful_credential_update_preserves_existing_non_option_data() -> None:
+    async def validator(username: str, password: str) -> None:
+        assert username == "new@example.test"
+        assert password == "new-secret"
+
+    result = asyncio.run(
+        async_validate_credential_update(
+            {
+                CONF_USERNAME: "old@example.test",
+                CONF_PASSWORD: "old-secret",
+                "future_setup_key": "preserve-me",
+                OPTION_CHILDREN: [{"name": "Kind", "slug": "kind"}],
+                OPTION_UPDATE_TIME: "06:00",
+            },
+            {CONF_USERNAME: " new@example.test ", CONF_PASSWORD: "new-secret"},
+            validator=validator,
+        )
+    )
+
+    assert result.errors == {}
+    assert result.action == "update_existing_entry"
+    assert result.data_updates == {
+        CONF_USERNAME: "new@example.test",
+        CONF_PASSWORD: "new-secret",
+    }
+    assert result.entry_data == {
+        CONF_USERNAME: "new@example.test",
+        CONF_PASSWORD: "new-secret",
+        "future_setup_key": "preserve-me",
+    }
+    assert OPTION_CHILDREN not in result.entry_data
+    assert OPTION_UPDATE_TIME not in result.entry_data
+
+
+def test_credential_update_failure_returns_safe_errors() -> None:
+    async def validator(username: str, password: str) -> None:
+        raise KitafinoInvalidAuthError()
+
+    result = asyncio.run(
+        async_validate_credential_update(
+            {CONF_USERNAME: "old@example.test", CONF_PASSWORD: "old-secret"},
+            {CONF_USERNAME: "new@example.test", CONF_PASSWORD: "bad-secret"},
+            validator=validator,
+        )
+    )
+
+    assert result.errors == {"base": "invalid_auth"}
+    assert result.data_updates == {}
+    assert result.entry_data == {}
+
+
+def test_credential_update_schema_keys_match_credentials() -> None:
+    schema = build_credential_update_schema()
+
+    assert tuple(schema.keys()) == (CONF_USERNAME, CONF_PASSWORD)
 
 
 def test_default_options_are_stable_and_secret_free() -> None:
@@ -316,3 +375,25 @@ def test_translation_files_include_options_labels_and_errors() -> None:
             "invalid_update_time",
         ):
             assert error_key in options["error"]
+
+
+def test_translation_files_include_reauth_and_reconfigure_strings() -> None:
+    for language in ("en", "de"):
+        translations = json.loads(
+            (ROOT / f"custom_components/speiseplan/translations/{language}.json").read_text()
+        )
+
+        config = translations["config"]
+        for step_key in ("reauth_confirm", "reconfigure"):
+            step = config["step"][step_key]
+            assert step["title"]
+            assert step["description"]
+            assert CONF_USERNAME in step["data"]
+            assert CONF_PASSWORD in step["data"]
+
+        for error_key in ("invalid_auth", "cannot_connect", "unknown"):
+            assert error_key in config["error"]
+
+        assert "reauth_successful" in config["abort"]
+        assert "reconfigure_successful" in config["abort"]
+        assert "unique_id_mismatch" in config["abort"]

@@ -62,8 +62,25 @@ class OptionsValidationResult:
     errors: dict[str, str]
 
 
+@dataclass(frozen=True)
+class CredentialUpdateResult:
+    """Result of validating a credential update for an existing entry."""
+
+    entry_data: dict[str, Any]
+    data_updates: dict[str, str]
+    errors: dict[str, str]
+    action: str
+
+
 CHILD_SLUG_PATTERN = re.compile(r"^[a-z0-9_]+$")
 UPDATE_TIME_PATTERN = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+OPTION_KEYS = {
+    OPTION_CHILDREN,
+    OPTION_CHILDREN_TEXT,
+    OPTION_UPDATE_TIME,
+    OPTION_MQTT_ENABLED,
+    OPTION_SHARED_SOURCE,
+}
 
 
 def _user_schema_dict() -> dict[Any, type[str]]:
@@ -107,6 +124,11 @@ def build_user_schema() -> Any:
         return _user_schema_dict()
 
     return vol.Schema(_user_schema_dict())
+
+
+def build_credential_update_schema() -> Any:
+    """Build the Home Assistant credential update schema."""
+    return build_user_schema()
 
 
 def build_default_options() -> dict[str, Any]:
@@ -310,6 +332,43 @@ async def async_validate_user_input(
     return ValidationResult(data=data, errors={})
 
 
+def merge_credential_update(
+    existing_data: dict[str, Any],
+    credential_data: dict[str, str],
+) -> dict[str, Any]:
+    """Merge credential updates into config-entry data without option keys."""
+    safe_existing_data = {
+        key: value
+        for key, value in existing_data.items()
+        if key not in OPTION_KEYS
+    }
+    return {**safe_existing_data, **credential_data}
+
+
+async def async_validate_credential_update(
+    existing_data: dict[str, Any],
+    user_input: dict[str, Any],
+    *,
+    validator: CredentialValidator | None = None,
+) -> CredentialUpdateResult:
+    """Validate credentials for an existing config entry update."""
+    result = await async_validate_user_input(user_input, validator=validator)
+    if result.errors:
+        return CredentialUpdateResult(
+            entry_data={},
+            data_updates={},
+            errors=result.errors,
+            action="show_form",
+        )
+
+    return CredentialUpdateResult(
+        entry_data=merge_credential_update(existing_data, result.data),
+        data_updates=result.data,
+        errors={},
+        action="update_existing_entry",
+    )
+
+
 if config_entries is not None:
 
     class SpeiseplanConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -351,6 +410,69 @@ if config_entries is not None:
                 )
 
             return self.async_show_form(step_id="user", data_schema=build_user_schema())
+
+        async def async_step_reauth(
+            self,
+            entry_data: dict[str, Any],
+        ) -> Any:
+            """Handle a reauthentication request."""
+            return await self.async_step_reauth_confirm()
+
+        async def async_step_reauth_confirm(
+            self,
+            user_input: dict[str, Any] | None = None,
+        ) -> Any:
+            """Confirm and process reauthentication credentials."""
+            if user_input is None:
+                return self.async_show_form(
+                    step_id="reauth_confirm",
+                    data_schema=build_credential_update_schema(),
+                )
+
+            entry = self._get_reauth_entry()
+            result = await async_validate_credential_update(entry.data, user_input)
+            if result.errors:
+                return self.async_show_form(
+                    step_id="reauth_confirm",
+                    data_schema=build_credential_update_schema(),
+                    errors=result.errors,
+                )
+
+            await self.async_set_unique_id(DOMAIN)
+            self._abort_if_unique_id_mismatch()
+            self.hass.config_entries.async_update_entry(
+                entry,
+                data=result.entry_data,
+            )
+            return self.async_update_reload_and_abort(entry)
+
+        async def async_step_reconfigure(
+            self,
+            user_input: dict[str, Any] | None = None,
+        ) -> Any:
+            """Handle credential reconfiguration for an existing entry."""
+            if user_input is None:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=build_credential_update_schema(),
+                )
+
+            entry = self._get_reconfigure_entry()
+            result = await async_validate_credential_update(entry.data, user_input)
+            if result.errors:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=build_credential_update_schema(),
+                    errors=result.errors,
+                )
+
+            await self.async_set_unique_id(DOMAIN)
+            self._abort_if_unique_id_mismatch()
+            self.hass.config_entries.async_update_entry(
+                entry,
+                data=result.entry_data,
+            )
+            return self.async_update_reload_and_abort(entry)
 
 else:
 
