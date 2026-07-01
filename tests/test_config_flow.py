@@ -12,11 +12,20 @@ from custom_components.speiseplan.const import (
     CONF_PASSWORD,
     CONF_USERNAME,
     DEFAULT_TITLE,
+    OPTION_CHILDREN,
+    OPTION_CHILDREN_TEXT,
+    OPTION_MQTT_ENABLED,
+    OPTION_SHARED_SOURCE,
+    OPTION_UPDATE_TIME,
 )
 from custom_components.speiseplan.config_flow import (
     async_validate_user_input,
+    build_default_options,
+    normalize_options_input,
+    options_with_defaults,
     get_duplicate_setup_abort_reason,
     get_user_schema_keys,
+    parse_children_text,
 )
 from custom_components.speiseplan.kitafino.client import KitafinoClient
 from custom_components.speiseplan.kitafino.errors import (
@@ -152,3 +161,158 @@ def test_validation_errors_map_to_safe_form_errors(
 
     assert result.errors == {"base": expected_error}
     assert result.data == {}
+
+
+def test_default_options_are_stable_and_secret_free() -> None:
+    options = build_default_options()
+
+    assert options == {
+        OPTION_CHILDREN: [],
+        OPTION_UPDATE_TIME: "06:00",
+        OPTION_MQTT_ENABLED: False,
+        OPTION_SHARED_SOURCE: True,
+    }
+    assert CONF_USERNAME not in options
+    assert CONF_PASSWORD not in options
+
+
+def test_parse_children_text_normalizes_child_rows() -> None:
+    result = parse_children_text("Lena:lena\n Max Mustermann:max_1 ")
+
+    assert result.children == [
+        {"name": "Lena", "slug": "lena"},
+        {"name": "Max Mustermann", "slug": "max_1"},
+    ]
+    assert result.errors == {}
+
+
+@pytest.mark.parametrize(
+    ("children_text", "error"),
+    [
+        ("NoSeparator", "invalid_child_row"),
+        (":slug", "missing_child_name"),
+        ("Name:Bad-Slug", "invalid_child_slug"),
+        ("One:kind\nTwo:kind", "duplicate_child_slug"),
+    ],
+)
+def test_parse_children_text_rejects_invalid_rows(
+    children_text: str,
+    error: str,
+) -> None:
+    result = parse_children_text(children_text)
+
+    assert result.children == []
+    assert result.errors == {"base": error}
+
+
+def test_normalize_options_input_returns_safe_options_payload() -> None:
+    result = normalize_options_input(
+        {
+            OPTION_CHILDREN_TEXT: "Kind 1:kind_1",
+            OPTION_UPDATE_TIME: "06:30",
+            OPTION_MQTT_ENABLED: True,
+            OPTION_SHARED_SOURCE: True,
+            CONF_USERNAME: "should-not-survive",
+            CONF_PASSWORD: "should-not-survive",
+        }
+    )
+
+    assert result.errors == {}
+    assert result.data == {
+        OPTION_CHILDREN: [{"name": "Kind 1", "slug": "kind_1"}],
+        OPTION_UPDATE_TIME: "06:30",
+        OPTION_MQTT_ENABLED: True,
+        OPTION_SHARED_SOURCE: True,
+    }
+    assert CONF_USERNAME not in result.data
+    assert CONF_PASSWORD not in result.data
+    assert OPTION_CHILDREN_TEXT not in result.data
+
+
+@pytest.mark.parametrize("update_time", ["6:00", "24:00", "12:99", "nope"])
+def test_normalize_options_input_rejects_invalid_update_time(
+    update_time: str,
+) -> None:
+    result = normalize_options_input({OPTION_UPDATE_TIME: update_time})
+
+    assert result.errors == {"base": "invalid_update_time"}
+    assert result.data == {}
+
+
+@pytest.mark.parametrize(
+    "user_input",
+    [
+        {OPTION_MQTT_ENABLED: "false"},
+        {OPTION_SHARED_SOURCE: "false"},
+        {OPTION_MQTT_ENABLED: 1},
+        {OPTION_SHARED_SOURCE: 0},
+    ],
+)
+def test_normalize_options_input_rejects_non_boolean_flags(
+    user_input: dict[str, object],
+) -> None:
+    result = normalize_options_input(user_input)
+
+    assert result.errors == {"base": "invalid_options"}
+    assert result.data == {}
+
+
+def test_options_with_defaults_reconstructs_form_child_text() -> None:
+    options = options_with_defaults(
+        {
+            OPTION_CHILDREN: [
+                {"name": "Kind 1", "slug": "kind_1"},
+                {"name": "Kind 2", "slug": "kind_2"},
+            ]
+        }
+    )
+
+    assert options[OPTION_CHILDREN_TEXT] == "Kind 1:kind_1\nKind 2:kind_2"
+
+
+def test_options_with_defaults_ignores_malformed_persisted_children() -> None:
+    options = options_with_defaults({OPTION_CHILDREN: ["broken", object()]})
+
+    assert options[OPTION_CHILDREN_TEXT] == ""
+
+
+def test_options_with_defaults_preserves_submitted_values_for_retry() -> None:
+    options = options_with_defaults(
+        {
+            OPTION_CHILDREN_TEXT: "Broken Row",
+            OPTION_UPDATE_TIME: "6:00",
+            OPTION_MQTT_ENABLED: False,
+            OPTION_SHARED_SOURCE: True,
+        }
+    )
+
+    assert options[OPTION_CHILDREN_TEXT] == "Broken Row"
+    assert options[OPTION_UPDATE_TIME] == "6:00"
+
+
+def test_translation_files_include_options_labels_and_errors() -> None:
+    for language in ("en", "de"):
+        translations = json.loads(
+            (ROOT / f"custom_components/speiseplan/translations/{language}.json").read_text()
+        )
+
+        options = translations["options"]
+        option_step = options["step"]["init"]
+        for option_key in (
+            OPTION_CHILDREN_TEXT,
+            OPTION_UPDATE_TIME,
+            OPTION_MQTT_ENABLED,
+            OPTION_SHARED_SOURCE,
+        ):
+            assert option_key in option_step["data"]
+            assert option_key in option_step["data_description"]
+
+        for error_key in (
+            "invalid_child_row",
+            "missing_child_name",
+            "invalid_child_slug",
+            "duplicate_child_slug",
+            "invalid_options",
+            "invalid_update_time",
+        ):
+            assert error_key in options["error"]

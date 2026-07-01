@@ -19,5 +19,33 @@
     "abort": {
       "already_configured": "Kitafino Meal Plan is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kitafino Meal Plan options",
+        "description": "Configure local Home Assistant settings. Child rows use one line per child in the format Display Name:slug.",
+        "data": {
+          "children_text": "Children",
+          "update_time": "Daily update time",
+          "mqtt_enabled": "Enable MQTT publishing",
+          "shared_source": "Use shared Kitafino meal plan source"
+        },
+        "data_description": {
+          "children_text": "Enter one child per line as Display Name:slug. Child labels are metadata only in shared-source mode.",
+          "update_time": "Local time for the daily refresh, using HH:MM.",
+          "mqtt_enabled": "Publish meal plan data to MQTT when later MQTT publishing support is active.",
+          "shared_source": "Treat the Kitafino meal plan as one shared source instead of child-specific meal data."
+        }
+      }
+    },
+    "error": {
+      "invalid_child_row": "Enter one child per line as Display Name:slug.",
+      "missing_child_name": "Each child row needs a display name before the colon.",
+      "invalid_child_slug": "Child slugs may only contain lowercase letters, numbers, and underscores, up to 32 characters.",
+      "duplicate_child_slug": "Each child slug must be unique.",
+      "invalid_options": "One or more options have an invalid value.",
+      "invalid_update_time": "Enter the update time in HH:MM format."
+    }
   }
 }

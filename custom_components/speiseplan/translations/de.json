@@ -19,5 +19,33 @@
     "abort": {
       "already_configured": "Kitafino Meal Plan ist bereits eingerichtet."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kitafino Meal Plan Optionen",
+        "description": "Konfiguriere lokale Home-Assistant-Einstellungen. Kinder werden zeilenweise im Format Anzeigename:slug erfasst.",
+        "data": {
+          "children_text": "Kinder",
+          "update_time": "Taegliche Aktualisierungszeit",
+          "mqtt_enabled": "MQTT-Veroeffentlichung aktivieren",
+          "shared_source": "Gemeinsame Kitafino-Speiseplanquelle verwenden"
+        },
+        "data_description": {
+          "children_text": "Erfasse ein Kind pro Zeile als Anzeigename:slug. Kinderlabels sind im gemeinsamen Quellenmodus nur Metadaten.",
+          "update_time": "Lokale Uhrzeit fuer die taegliche Aktualisierung im Format HH:MM.",
+          "mqtt_enabled": "Speiseplandaten per MQTT veroeffentlichen, sobald die spaetere MQTT-Unterstuetzung aktiv ist.",
+          "shared_source": "Den Kitafino-Speiseplan als gemeinsame Quelle behandeln, nicht als kinderspezifische Essensdaten."
+        }
+      }
+    },
+    "error": {
+      "invalid_child_row": "Erfasse ein Kind pro Zeile als Anzeigename:slug.",
+      "missing_child_name": "Jede Kinderzeile benoetigt vor dem Doppelpunkt einen Anzeigenamen.",
+      "invalid_child_slug": "Kinder-Slugs duerfen nur Kleinbuchstaben, Zahlen und Unterstriche enthalten, maximal 32 Zeichen.",
+      "duplicate_child_slug": "Jeder Kinder-Slug muss eindeutig sein.",
+      "invalid_options": "Eine oder mehrere Optionen haben einen ungueltigen Wert.",
+      "invalid_update_time": "Erfasse die Aktualisierungszeit im Format HH:MM."
+    }
   }
 }
