@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
+from types import SimpleNamespace
 
-from custom_components.speiseplan.const import FORBIDDEN_SECRET_MARKERS
+from custom_components.speiseplan.const import (
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    FORBIDDEN_SECRET_MARKERS,
+)
+from custom_components.speiseplan.diagnostics import async_get_config_entry_diagnostics
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,3 +30,20 @@ def test_public_scaffold_contains_no_forbidden_secret_markers() -> None:
 
     for marker in FORBIDDEN_SECRET_MARKERS:
         assert marker not in public_text
+
+
+def test_diagnostics_redact_config_entry_credentials() -> None:
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_USERNAME: "parent@example.test",
+            CONF_PASSWORD: "super-secret",
+        },
+    )
+
+    diagnostics = asyncio.run(async_get_config_entry_diagnostics(None, entry))
+
+    assert diagnostics["username_configured"] is True
+    assert diagnostics["password_configured"] is True
+    assert "parent@example.test" not in str(diagnostics)
+    assert "super-secret" not in str(diagnostics)

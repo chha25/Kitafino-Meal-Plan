@@ -8,20 +8,21 @@ This repository is in early implementation. The MVP target is:
 
 - HACS custom repository installation
 - Home Assistant minimum version `2026.6.4`
-- Home Assistant UI configuration in later stories
+- Initial Home Assistant UI credential setup
+- Child, schedule, reauth, and MQTT option surfaces in later stories
 - Shared-source Current Week meal sensors first
 - Child-specific sensors deferred until reliable Kitafino evidence exists
 - Next Week support deferred until reliable Kitafino evidence exists
 - Secure handling of credentials, cookies, diagnostics, fixtures, and examples
 
-The integration scaffold is in place. Runtime Kitafino login, credential validation, meal parsing, real Home Assistant entities, and optional MQTT publishing are implemented in later stories.
+The integration scaffold and initial credential setup flow are in place. Runtime Kitafino meal fetching, meal parsing, real Home Assistant entities, child/options management, reauthentication, and optional MQTT publishing are implemented in later stories.
 
 ## Installation
 
 1. Add this repository as a HACS custom repository of type `Integration`.
 2. Install the Speiseplan integration through HACS.
 3. Restart Home Assistant if HACS asks for it.
-4. Add the integration through the Home Assistant UI after config-flow implementation is complete.
+4. Add the integration through the Home Assistant UI and enter your Kitafino credentials.
 
 ## Repository Setup
 

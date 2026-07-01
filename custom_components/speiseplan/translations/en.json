@@ -3,9 +3,21 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up Speiseplan",
-        "description": "Configure Kitafino access in a later setup step."
+        "title": "Set up Kitafino Meal Plan",
+        "description": "Enter your Kitafino credentials. They are stored only in the Home Assistant config entry.",
+        "data": {
+          "username": "Kitafino username",
+          "password": "Kitafino password"
+        }
       }
+    },
+    "error": {
+      "invalid_auth": "Kitafino rejected the submitted credentials.",
+      "cannot_connect": "Could not connect to Kitafino.",
+      "unknown": "Unexpected validation error."
+    },
+    "abort": {
+      "already_configured": "Kitafino Meal Plan is already configured."
     }
   }
 }

@@ -1,6 +1,10 @@
 """Constants for the Speiseplan integration."""
 
 DOMAIN = "speiseplan"
+DEFAULT_TITLE = "Kitafino Meal Plan"
+
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday")
 SHARED_CURRENT_ENTITY_ID_TEMPLATE = "sensor.speiseplan_shared_current_{weekday}"

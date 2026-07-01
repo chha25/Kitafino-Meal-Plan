@@ -3,9 +3,21 @@
   "config": {
     "step": {
       "user": {
-        "title": "Speiseplan einrichten",
-        "description": "Kitafino-Zugang wird in einem spaeteren Einrichtungsschritt konfiguriert."
+        "title": "Kitafino Meal Plan einrichten",
+        "description": "Gib deine Kitafino-Zugangsdaten ein. Sie werden nur im Home-Assistant-Config-Entry gespeichert.",
+        "data": {
+          "username": "Kitafino-Benutzername",
+          "password": "Kitafino-Passwort"
+        }
       }
+    },
+    "error": {
+      "invalid_auth": "Kitafino hat die eingegebenen Zugangsdaten abgelehnt.",
+      "cannot_connect": "Verbindung zu Kitafino nicht moeglich.",
+      "unknown": "Unerwarteter Validierungsfehler."
+    },
+    "abort": {
+      "already_configured": "Kitafino Meal Plan ist bereits eingerichtet."
     }
   }
 }
