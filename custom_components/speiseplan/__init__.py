@@ -7,7 +7,7 @@ from typing import Any
 from .const import DOMAIN
 from .services import async_setup_services
 
-PLATFORMS: tuple[str, ...] = ()
+PLATFORMS: tuple[str, ...] = ("sensor",)
 
 
 async def async_setup_entry(hass: Any, entry: Any) -> bool:
@@ -15,6 +15,10 @@ async def async_setup_entry(hass: Any, entry: Any) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {"entry": entry}
     await async_setup_services(hass)
+    config_entries = getattr(hass, "config_entries", None)
+    forward_setups = getattr(config_entries, "async_forward_entry_setups", None)
+    if callable(forward_setups):
+        await forward_setups(entry, PLATFORMS)
     return True
 
 
