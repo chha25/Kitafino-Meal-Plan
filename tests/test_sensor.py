@@ -21,6 +21,8 @@ from custom_components.speiseplan.models import (
     MealPlanSnapshot,
 )
 from custom_components.speiseplan.sensor import (
+    HEALTH_ENTITY_ID,
+    SpeiseplanHealthSensor,
     SpeiseplanSharedCurrentMealSensor,
     async_setup_entry,
     build_shared_current_meal_sensors,
@@ -112,10 +114,13 @@ def _next_week_entry(weekday: str, meal_text: str) -> MealEntry:
 def _snapshot(
     *entries: MealEntry,
     children: list[Child] | None = None,
+    health_state: str = "ok",
+    last_error: str | None = None,
 ) -> MealPlanSnapshot:
     return MealPlanSnapshot(
         health=HealthStatus(
-            state="ok",
+            state=health_state,
+            last_error=last_error,
             fetched_at=FETCHED_AT,
             last_successful_update=FETCHED_AT,
         ),
@@ -231,9 +236,10 @@ def test_sensor_setup_uses_coordinator_from_hass_data() -> None:
 
     _run(async_setup_entry(hass, FakeEntry(), added.extend))
 
-    assert len(added) == 5
+    assert len(added) == 6
+    assert isinstance(added[0], SpeiseplanHealthSensor)
     assert all(
-        isinstance(sensor, SpeiseplanSharedCurrentMealSensor) for sensor in added
+        isinstance(sensor, SpeiseplanSharedCurrentMealSensor) for sensor in added[1:]
     )
 
 
@@ -246,6 +252,91 @@ def test_integration_setup_forwards_sensor_platform() -> None:
     assert result is True
     assert PLATFORMS == ("sensor",)
     assert hass.config_entries.forwarded == [(entry, ("sensor",))]
+
+
+def test_health_sensor_reports_snapshot_health_and_freshness_attributes() -> None:
+    sensor = SpeiseplanHealthSensor(
+        coordinator=FakeCoordinator(
+            _snapshot(
+                _entry("monday", "Pasta"),
+                children=[Child(child_key="kind_1", display_name="Kind 1")],
+            )
+        )
+    )
+
+    assert sensor.entity_id == HEALTH_ENTITY_ID
+    assert sensor.unique_id == "speiseplan_health"
+    assert sensor.name == "Speiseplan Health"
+    assert sensor.native_value == "ok"
+    assert sensor.available is True
+    assert sensor.extra_state_attributes == {
+        "last_successful_update": FETCHED_AT,
+        "last_error": None,
+        "configured_child_count": 1,
+        "shared_source": True,
+        "parser_version": "kitafino-html-v1",
+        "fetched_at": FETCHED_AT,
+    }
+
+
+def test_health_sensor_reports_stale_status_with_last_error() -> None:
+    sensor = SpeiseplanHealthSensor(
+        coordinator=FakeCoordinator(
+            _snapshot(
+                _entry("monday", "Pasta", stale=True),
+                health_state="stale",
+                last_error="network_error",
+            )
+        )
+    )
+
+    assert sensor.native_value == "stale"
+    assert sensor.extra_state_attributes["last_error"] == "network_error"
+
+
+def test_health_sensor_without_snapshot_is_unavailable() -> None:
+    sensor = SpeiseplanHealthSensor(coordinator=FakeCoordinator(None))
+
+    assert sensor.native_value is None
+    assert sensor.available is False
+    assert sensor.extra_state_attributes == {
+        "last_successful_update": None,
+        "last_error": None,
+        "configured_child_count": 0,
+        "shared_source": True,
+        "parser_version": None,
+        "fetched_at": None,
+    }
+
+
+def test_health_sensor_public_data_contains_no_secret_markers() -> None:
+    sensor = SpeiseplanHealthSensor(
+        coordinator=FakeCoordinator(
+            _snapshot(
+                _entry("monday", "Pasta"),
+                children=[Child(child_key="secret", display_name="Private Child")],
+            )
+        )
+    )
+
+    serialized = json.dumps(
+        {
+            "entity_id": sensor.entity_id,
+            "name": sensor.name,
+            "native_value": sensor.native_value,
+            "attributes": sensor.extra_state_attributes,
+        },
+        sort_keys=True,
+    )
+
+    for marker in FORBIDDEN_SECRET_MARKERS:
+        assert marker not in serialized
+    assert "Private Child" not in serialized
+    assert "username" not in serialized.lower()
+    assert "password" not in serialized.lower()
+    assert "cookie" not in serialized.lower()
+    assert "raw_html" not in serialized.lower()
+    assert "account_id" not in serialized.lower()
 
 
 def test_sensor_public_data_contains_no_secret_markers() -> None:

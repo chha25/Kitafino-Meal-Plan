@@ -13,6 +13,77 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - local tests without HA installed
     SensorEntity = object  # type: ignore[assignment,misc]
 
+HEALTH_ENTITY_ID = "sensor.speiseplan_health"
+
+
+class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
+    """Integration health and freshness sensor."""
+
+    def __init__(self, *, coordinator: Any) -> None:
+        """Create a health sensor reading coordinator snapshot state."""
+        self.coordinator = coordinator
+        self._attr_entity_id = HEALTH_ENTITY_ID
+        self._attr_unique_id = "speiseplan_health"
+        self._attr_name = "Speiseplan Health"
+
+    @property
+    def entity_id(self) -> str:
+        """Return the stable entity ID."""
+        return self._attr_entity_id
+
+    @property
+    def unique_id(self) -> str:
+        """Return the stable unique ID."""
+        return self._attr_unique_id
+
+    @property
+    def name(self) -> str:
+        """Return the friendly name."""
+        return self._attr_name
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current health state."""
+        snapshot = self._snapshot
+        if snapshot is None:
+            return None
+        return snapshot.health.state
+
+    @property
+    def available(self) -> bool:
+        """Return whether health state is available."""
+        return self._snapshot is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe health and freshness attributes."""
+        snapshot = self._snapshot
+        if snapshot is None:
+            return {
+                "last_successful_update": None,
+                "last_error": None,
+                "configured_child_count": 0,
+                "shared_source": True,
+                "parser_version": None,
+                "fetched_at": None,
+            }
+
+        return {
+            "last_successful_update": snapshot.last_successful_update,
+            "last_error": snapshot.health.last_error,
+            "configured_child_count": len(snapshot.children),
+            "shared_source": snapshot.shared_source,
+            "parser_version": snapshot.parser_version,
+            "fetched_at": snapshot.fetched_at,
+        }
+
+    @property
+    def _snapshot(self) -> MealPlanSnapshot | None:
+        snapshot = getattr(self.coordinator, "snapshot", None)
+        if isinstance(snapshot, MealPlanSnapshot):
+            return snapshot
+        return None
+
 
 class SpeiseplanSharedCurrentMealSensor(SensorEntity):  # type: ignore[misc]
     """Shared-source current-week meal sensor."""
@@ -116,6 +187,14 @@ def build_shared_current_meal_sensors(
     ]
 
 
+def build_sensors(coordinator: Any) -> list[Any]:
+    """Build all Speiseplan sensors for one coordinator."""
+    return [
+        SpeiseplanHealthSensor(coordinator=coordinator),
+        *build_shared_current_meal_sensors(coordinator),
+    ]
+
+
 async def async_setup_entry(
     hass: Any,
     entry: Any,
@@ -131,4 +210,4 @@ async def async_setup_entry(
         async_add_entities([])
         return
 
-    async_add_entities(build_shared_current_meal_sensors(coordinator))
+    async_add_entities(build_sensors(coordinator))
