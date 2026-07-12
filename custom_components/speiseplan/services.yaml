@@ -1,1 +1,10 @@
-{}
+refresh:
+  name: Refresh
+  description: Manually refresh the Kitafino meal plan, subject to throttling.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional Speiseplan config entry ID to refresh. If omitted, all configured Speiseplan entries are refreshed.
+      required: false
+      selector:
+        text:

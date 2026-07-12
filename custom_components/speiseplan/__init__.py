@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .const import DOMAIN
+from .services import async_setup_services
 
 PLATFORMS: tuple[str, ...] = ()
 
@@ -13,6 +14,7 @@ async def async_setup_entry(hass: Any, entry: Any) -> bool:
     """Set up Speiseplan from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {"entry": entry}
+    await async_setup_services(hass)
     return True
 
 
