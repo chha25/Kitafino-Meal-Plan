@@ -41,6 +41,13 @@ def test_readme_documents_child_specific_sensors_as_deferred() -> None:
     assert "Child-specific meal sensors are deferred" in readme
 
 
+def test_readme_documents_next_week_as_deferred() -> None:
+    readme = (ROOT / "README.md").read_text()
+
+    assert "Next Week support is deferred" in readme
+    assert "Current Week sensors do not depend on Next Week data" in readme
+
+
 def test_diagnostics_redact_config_entry_credentials() -> None:
     entry = SimpleNamespace(
         entry_id="entry-1",

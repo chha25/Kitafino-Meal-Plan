@@ -94,6 +94,21 @@ def _entry(weekday: str, meal_text: str, *, stale: bool = False) -> MealEntry:
     )
 
 
+def _next_week_entry(weekday: str, meal_text: str) -> MealEntry:
+    return MealEntry(
+        child_key="shared",
+        week_kind="next",
+        iso_year=2026,
+        iso_week=30,
+        weekday=weekday,
+        meal_text=meal_text,
+        source_date=None,
+        fetched_at=FETCHED_AT,
+        stale=False,
+        shared_source=True,
+    )
+
+
 def _snapshot(
     *entries: MealEntry,
     children: list[Child] | None = None,
@@ -152,6 +167,23 @@ def test_configured_child_labels_do_not_create_child_specific_sensors() -> None:
     assert all("Shared Current Week" in sensor.name for sensor in sensors)
     assert all("Kind 1" not in sensor.name for sensor in sensors)
     assert all("Kind 2" not in sensor.name for sensor in sensors)
+
+
+def test_next_week_entries_do_not_create_extra_sensors_or_replace_current_week() -> None:
+    coordinator = FakeCoordinator(
+        _snapshot(
+            _entry("monday", "Current pasta"),
+            _next_week_entry("monday", "Future soup"),
+        )
+    )
+
+    sensors = build_shared_current_meal_sensors(coordinator)
+    monday = sensors[0]
+
+    assert len(sensors) == 5
+    assert monday.entity_id == "sensor.speiseplan_shared_current_monday"
+    assert monday.native_value == "Current pasta"
+    assert monday.extra_state_attributes["week_kind"] == "current"
 
 
 def test_shared_current_sensor_state_and_attributes_from_snapshot() -> None:

@@ -23,6 +23,8 @@ Child labels are metadata in the MVP. They help preserve household context in co
 
 Child-specific meal sensors are deferred until reliable Kitafino evidence exists. Until then, the integration exposes shared-source Current Week meal sensors and marks shared-source state explicitly in sensor attributes.
 
+Next Week support is deferred until Kitafino exposes it reliably enough to test. Current Week sensors do not depend on Next Week data, and missing or inconsistent Next Week source data should not make Current Week sensors unavailable.
+
 ## Installation
 
 1. Add this repository as a HACS custom repository of type `Integration`.
