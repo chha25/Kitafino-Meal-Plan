@@ -1,8 +1,22 @@
 <html>
   <body>
-    <section data-fixture="synthetic-current-week">
+    <section data-fixture="synthetic-current-week" data-week="current">
       <div class="weekday">Monday</div>
-      <div class="meal">Synthetic meal text</div>
+      <div class="meal">
+        Synthetic meal text
+        <span class="price">3,50 EUR</span>
+      </div>
+    </section>
+    <section data-fixture="synthetic-current-week" data-week="current" data-source-date="2026-07-14">
+      <div class="weekday">Dienstag</div>
+      <div class="meal">Rice
+
+        with     vegetables
+      </div>
+    </section>
+    <section data-fixture="synthetic-next-week" data-week="next">
+      <div class="weekday">Monday</div>
+      <div class="meal">Future meal must not become MVP output</div>
     </section>
   </body>
 </html>
