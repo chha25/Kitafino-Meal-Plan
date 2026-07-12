@@ -15,7 +15,13 @@ This repository is in early implementation. The MVP target is:
 - Next Week support deferred until reliable Kitafino evidence exists
 - Secure handling of credentials, cookies, diagnostics, fixtures, and examples
 
-The integration scaffold and initial credential setup flow are in place. Runtime Kitafino meal fetching, meal parsing, real Home Assistant entities, child/options management, reauthentication, and optional MQTT publishing are implemented in later stories.
+The integration scaffold, configuration flow, Kitafino retrieval/parsing core, stale snapshot handling, manual refresh service, and shared Current Week sensor projection are in place. Runtime wiring will continue to mature through the remaining stories.
+
+## Shared Source and Child Labels
+
+Child labels are metadata in the MVP. They help preserve household context in configuration and diagnostics, but they do not mean Kitafino has provided child-specific meals.
+
+Child-specific meal sensors are deferred until reliable Kitafino evidence exists. Until then, the integration exposes shared-source Current Week meal sensors and marks shared-source state explicitly in sensor attributes.
 
 ## Installation
 

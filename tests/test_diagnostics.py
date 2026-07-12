@@ -10,6 +10,8 @@ from custom_components.speiseplan.const import (
     CONF_PASSWORD,
     CONF_USERNAME,
     FORBIDDEN_SECRET_MARKERS,
+    OPTION_CHILDREN,
+    OPTION_SHARED_SOURCE,
 )
 from custom_components.speiseplan.diagnostics import async_get_config_entry_diagnostics
 
@@ -30,6 +32,13 @@ def test_public_scaffold_contains_no_forbidden_secret_markers() -> None:
 
     for marker in FORBIDDEN_SECRET_MARKERS:
         assert marker not in public_text
+
+
+def test_readme_documents_child_specific_sensors_as_deferred() -> None:
+    readme = (ROOT / "README.md").read_text()
+
+    assert "Child labels are metadata" in readme
+    assert "Child-specific meal sensors are deferred" in readme
 
 
 def test_diagnostics_redact_config_entry_credentials() -> None:
@@ -64,3 +73,32 @@ def test_diagnostics_remain_redacted_after_credential_update() -> None:
     assert diagnostics["password_configured"] is True
     assert "updated@example.test" not in str(diagnostics)
     assert "new-secret" not in str(diagnostics)
+
+
+def test_diagnostics_report_child_count_and_shared_source_without_labels() -> None:
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_USERNAME: "parent@example.test",
+            CONF_PASSWORD: "super-secret",
+        },
+        options={
+            OPTION_CHILDREN: [
+                {"name": "Lena", "slug": "lena"},
+                {"name": "Max", "slug": "max"},
+            ],
+            OPTION_SHARED_SOURCE: True,
+        },
+    )
+
+    diagnostics = asyncio.run(async_get_config_entry_diagnostics(None, entry))
+    serialized = str(diagnostics)
+
+    assert diagnostics["configured_child_count"] == 2
+    assert diagnostics["shared_source"] is True
+    assert "Lena" not in serialized
+    assert "Max" not in serialized
+    assert "lena" not in serialized
+    assert "max" not in serialized
+    assert "parent@example.test" not in serialized
+    assert "super-secret" not in serialized

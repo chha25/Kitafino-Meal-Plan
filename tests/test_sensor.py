@@ -14,7 +14,12 @@ from custom_components.speiseplan.const import (
     SHARED_CURRENT_ENTITY_ID_TEMPLATE,
     WEEKDAYS,
 )
-from custom_components.speiseplan.models import HealthStatus, MealEntry, MealPlanSnapshot
+from custom_components.speiseplan.models import (
+    Child,
+    HealthStatus,
+    MealEntry,
+    MealPlanSnapshot,
+)
 from custom_components.speiseplan.sensor import (
     SpeiseplanSharedCurrentMealSensor,
     async_setup_entry,
@@ -89,13 +94,17 @@ def _entry(weekday: str, meal_text: str, *, stale: bool = False) -> MealEntry:
     )
 
 
-def _snapshot(*entries: MealEntry) -> MealPlanSnapshot:
+def _snapshot(
+    *entries: MealEntry,
+    children: list[Child] | None = None,
+) -> MealPlanSnapshot:
     return MealPlanSnapshot(
         health=HealthStatus(
             state="ok",
             fetched_at=FETCHED_AT,
             last_successful_update=FETCHED_AT,
         ),
+        children=list(children or []),
         entries=list(entries),
         fetched_at=FETCHED_AT,
         last_successful_update=FETCHED_AT,
@@ -124,6 +133,25 @@ def test_builds_one_shared_current_sensor_per_weekday() -> None:
         for weekday in WEEKDAYS
     ]
     assert all("Shared Current Week" in sensor.name for sensor in sensors)
+
+
+def test_configured_child_labels_do_not_create_child_specific_sensors() -> None:
+    coordinator = FakeCoordinator(
+        _snapshot(
+            _entry("monday", "Pasta"),
+            children=[
+                Child(child_key="kind_1", display_name="Kind 1"),
+                Child(child_key="kind_2", display_name="Kind 2"),
+            ],
+        )
+    )
+
+    sensors = build_shared_current_meal_sensors(coordinator)
+
+    assert len(sensors) == 5
+    assert all("Shared Current Week" in sensor.name for sensor in sensors)
+    assert all("Kind 1" not in sensor.name for sensor in sensors)
+    assert all("Kind 2" not in sensor.name for sensor in sensors)
 
 
 def test_shared_current_sensor_state_and_attributes_from_snapshot() -> None:
