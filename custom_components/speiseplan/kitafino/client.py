@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from .errors import (
     KitafinoCannotConnectError,
@@ -12,10 +13,35 @@ from .errors import (
 )
 
 CredentialValidator = Callable[[str, str], Awaitable[None]]
+KitafinoTransport = Callable[["KitafinoTransportRequest"], Awaitable["KitafinoTransportResult"]]
 
 LOGIN_URL = "https://auth.kitafino.de/sys_k2/index.php?action=do_login"
+MEAL_PLAN_URL = "https://app.kitafino.de/sys_k2/index.php?action=bestellen"
 USER_AGENT = "Mozilla/5.0 (Home Assistant Kitafino Meal Plan)"
 TIMEOUT_SECONDS = 15
+
+
+@dataclass(frozen=True)
+class KitafinoTransportRequest:
+    """Transport request for login and optional meal-plan source fetch."""
+
+    username: str
+    password: str
+    login_url: str
+    meal_plan_url: str
+    fetch_source: bool
+
+
+@dataclass(frozen=True)
+class KitafinoTransportResult:
+    """Transport result with raw response metadata kept inside client scope."""
+
+    login_status: int
+    login_url: str
+    login_text: str
+    source_status: int | None = None
+    source_url: str | None = None
+    source_text: str | None = None
 
 
 class KitafinoClient:
@@ -27,25 +53,117 @@ class KitafinoClient:
         password: str,
         *,
         validator: CredentialValidator | None = None,
+        transport: KitafinoTransport | None = None,
+        login_url: str = LOGIN_URL,
+        meal_plan_url: str = MEAL_PLAN_URL,
     ) -> None:
         """Create a client without performing network I/O."""
-        self._username = username
-        self._password = password
+        self._username = username.strip()
+        self._password = password.strip()
         self._validator = validator
+        self._transport = transport
+        self._login_url = login_url
+        self._meal_plan_url = meal_plan_url
 
     async def async_validate_credentials(self) -> None:
         """Validate credentials through injected validation or Kitafino login."""
-        if not self._username.strip() or not self._password.strip():
-            raise KitafinoInvalidAuthError()
+        self._validate_configured_credentials()
 
         if self._validator is not None:
             await self._validator(self._username, self._password)
             return
 
-        await self._async_login_check()
+        result = await self._async_request(fetch_source=False)
+        self._raise_for_login_result(result)
+
+    async def async_fetch_meal_plan_source(self) -> str:
+        """Login to Kitafino and return the meal-plan source text."""
+        self._validate_configured_credentials()
+        result = await self._async_request(fetch_source=True)
+        self._raise_for_login_result(result)
+        self._raise_for_source_result(result)
+        if result.source_text is None:
+            raise KitafinoCannotConnectError()
+        return result.source_text
+
+    def _validate_configured_credentials(self) -> None:
+        """Validate local credential shape before touching the network."""
+        if not self._username.strip() or not self._password.strip():
+            raise KitafinoInvalidAuthError()
+
+    async def _async_request(self, *, fetch_source: bool) -> KitafinoTransportResult:
+        """Run the configured transport and normalize transport exceptions."""
+        request = KitafinoTransportRequest(
+            username=self._username,
+            password=self._password,
+            login_url=self._login_url,
+            meal_plan_url=self._meal_plan_url,
+            fetch_source=fetch_source,
+        )
+
+        transport_failed = False
+        try:
+            if self._transport is not None:
+                return await self._transport(request)
+            return await self._async_aiohttp_transport(request)
+        except (TimeoutError, asyncio.TimeoutError, OSError):
+            transport_failed = True
+
+        if transport_failed:
+            raise KitafinoCannotConnectError()
+
+        raise KitafinoCannotConnectError()
+
+    def _raise_for_login_result(self, result: KitafinoTransportResult) -> None:
+        """Map login response metadata to typed errors."""
+        if result.login_status in (401, 403):
+            raise KitafinoInvalidAuthError()
+
+        if result.login_status != 200:
+            raise KitafinoCannotConnectError()
+
+        if self._looks_like_login_page(result.login_url, result.login_text):
+            raise KitafinoInvalidAuthError()
+
+    def _raise_for_source_result(self, result: KitafinoTransportResult) -> None:
+        """Map authenticated source response metadata to typed errors."""
+        if (
+            result.source_status is None
+            or result.source_url is None
+            or result.source_text is None
+        ):
+            raise KitafinoCannotConnectError()
+
+        if result.source_status in (401, 403):
+            raise KitafinoInvalidAuthError()
+
+        if result.source_status != 200:
+            raise KitafinoCannotConnectError()
+
+        if self._looks_like_login_page(result.source_url, result.source_text or ""):
+            raise KitafinoInvalidAuthError()
+
+    @staticmethod
+    def _looks_like_login_page(url: str, text: str) -> bool:
+        """Return whether response metadata indicates Kitafino login failure."""
+        lowered_url = url.lower()
+        lowered_text = text.lower()
+        return (
+            "action=login" in lowered_url
+            or "name=\"passwort\"" in lowered_text
+            or "id=\"passwort\"" in lowered_text
+        )
 
     async def _async_login_check(self) -> None:
         """Perform a memory-only login check against Kitafino."""
+        result = await self._async_request(fetch_source=False)
+        self._raise_for_login_result(result)
+
+    async def _async_aiohttp_transport(
+        self,
+        request: KitafinoTransportRequest,
+    ) -> KitafinoTransportResult:
+        """Perform Kitafino HTTP requests with a memory-only aiohttp session."""
         try:
             import aiohttp
         except ModuleNotFoundError as err:  # pragma: no cover - HA provides aiohttp
@@ -54,28 +172,44 @@ class KitafinoClient:
         timeout = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
         headers = {"User-Agent": USER_AGENT}
         payload = {
-            "benutzername": self._username,
-            "passwort": self._password,
+            "benutzername": request.username,
+            "passwort": request.password,
             "login": "Anmelden",
         }
 
+        transport_failed = False
         try:
             async with aiohttp.ClientSession(
                 timeout=timeout,
                 headers=headers,
             ) as session:
-                async with session.post(LOGIN_URL, data=payload) as response:
-                    status = response.status
-                    final_url = str(response.url)
-                    text = await response.text()
-        except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError) as err:
-            raise KitafinoCannotConnectError() from err
+                async with session.post(request.login_url, data=payload) as response:
+                    login_status = response.status
+                    login_url = str(response.url)
+                    login_text = await response.text(errors="replace")
 
-        if status in (401, 403):
-            raise KitafinoInvalidAuthError()
+                if not request.fetch_source:
+                    return KitafinoTransportResult(
+                        login_status=login_status,
+                        login_url=login_url,
+                        login_text=login_text,
+                    )
 
-        if status != 200:
+                async with session.get(request.meal_plan_url) as response:
+                    source_status = response.status
+                    source_url = str(response.url)
+                    source_text = await response.text(errors="replace")
+        except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError, OSError):
+            transport_failed = True
+
+        if transport_failed:
             raise KitafinoCannotConnectError()
 
-        if "login" in final_url.lower() or "passwort" in text.lower():
-            raise KitafinoInvalidAuthError()
+        return KitafinoTransportResult(
+            login_status=login_status,
+            login_url=login_url,
+            login_text=login_text,
+            source_status=source_status,
+            source_url=source_url,
+            source_text=source_text,
+        )
