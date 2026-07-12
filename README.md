@@ -25,6 +25,31 @@ Child-specific meal sensors are deferred until reliable Kitafino evidence exists
 
 Next Week support is deferred until Kitafino exposes it reliably enough to test. Current Week sensors do not depend on Next Week data, and missing or inconsistent Next Week source data should not make Current Week sensors unavailable.
 
+## Entities and Attributes
+
+The MVP exposes one health sensor and one shared Current Week meal sensor per weekday:
+
+- `sensor.speiseplan_health`
+- `sensor.speiseplan_shared_current_{weekday}` where `{weekday}` is `monday`, `tuesday`, `wednesday`, `thursday`, or `friday`
+
+Meal sensor state is the sanitized meal text for that weekday. Missing Current Week meal data makes the weekday sensor unavailable instead of inventing a value.
+
+Meal sensor attributes are stable and non-secret:
+
+- `child_key`
+- `week_kind`
+- `iso_year`
+- `iso_week`
+- `weekday`
+- `source_date`
+- `last_successful_update`
+- `stale`
+- `shared_source`
+
+The health sensor state is one of the integration health values such as `ok`, `stale`, `login_failed`, `network_error`, `parse_error`, or `unknown_error`. Health attributes include `last_successful_update`, `last_error`, `configured_child_count`, `shared_source`, `parser_version`, and `fetched_at`.
+
+Entity states, attributes, diagnostics, and examples must not contain Kitafino credentials, cookies, raw HTML, raw request/response bodies, or account identifiers.
+
 ## Installation
 
 1. Add this repository as a HACS custom repository of type `Integration`.

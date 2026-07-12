@@ -48,6 +48,22 @@ def test_readme_documents_next_week_as_deferred() -> None:
     assert "Current Week sensors do not depend on Next Week data" in readme
 
 
+def test_readme_documents_entity_state_and_attribute_contract() -> None:
+    readme = (ROOT / "README.md").read_text()
+
+    for expected in (
+        "sensor.speiseplan_health",
+        "sensor.speiseplan_shared_current_{weekday}",
+        "last_successful_update",
+        "last_error",
+        "shared_source",
+        "stale",
+        "iso_week",
+        "parser_version",
+    ):
+        assert expected in readme
+
+
 def test_diagnostics_redact_config_entry_credentials() -> None:
     entry = SimpleNamespace(
         entry_id="entry-1",

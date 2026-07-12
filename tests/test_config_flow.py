@@ -17,6 +17,7 @@ from custom_components.speiseplan.const import (
     OPTION_MQTT_ENABLED,
     OPTION_SHARED_SOURCE,
     OPTION_UPDATE_TIME,
+    WEEKDAYS,
 )
 from custom_components.speiseplan.config_flow import (
     async_validate_user_input,
@@ -397,3 +398,25 @@ def test_translation_files_include_reauth_and_reconfigure_strings() -> None:
         assert "reauth_successful" in config["abort"]
         assert "reconfigure_successful" in config["abort"]
         assert "unique_id_mismatch" in config["abort"]
+
+
+def test_translation_files_include_entity_and_service_strings() -> None:
+    for language in ("en", "de"):
+        translations = json.loads(
+            (ROOT / f"custom_components/speiseplan/translations/{language}.json").read_text()
+        )
+
+        sensors = translations["entity"]["sensor"]
+        assert sensors["health"]["name"]
+        for weekday in WEEKDAYS:
+            key = f"shared_current_{weekday}"
+            assert key in sensors
+            assert sensors[key]["name"]
+            assert "shared" in sensors[key]["name"].lower() or "gemeinsam" in sensors[key]["name"].lower()
+            assert "current" in sensors[key]["name"].lower() or "aktuell" in sensors[key]["name"].lower()
+
+        refresh = translations["services"]["refresh"]
+        assert refresh["name"]
+        assert refresh["description"]
+        assert refresh["fields"]["entry_id"]["name"]
+        assert refresh["fields"]["entry_id"]["description"]

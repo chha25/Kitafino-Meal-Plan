@@ -66,5 +66,39 @@
       "invalid_options": "Eine oder mehrere Optionen haben einen ungueltigen Wert.",
       "invalid_update_time": "Erfasse die Aktualisierungszeit im Format HH:MM."
     }
+  },
+  "entity": {
+    "sensor": {
+      "health": {
+        "name": "Speiseplan Status"
+      },
+      "shared_current_monday": {
+        "name": "Gemeinsam aktuelle Woche Montag"
+      },
+      "shared_current_tuesday": {
+        "name": "Gemeinsam aktuelle Woche Dienstag"
+      },
+      "shared_current_wednesday": {
+        "name": "Gemeinsam aktuelle Woche Mittwoch"
+      },
+      "shared_current_thursday": {
+        "name": "Gemeinsam aktuelle Woche Donnerstag"
+      },
+      "shared_current_friday": {
+        "name": "Gemeinsam aktuelle Woche Freitag"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Speiseplan aktualisieren",
+      "description": "Aktualisiert den Kitafino-Speiseplan manuell unter Beruecksichtigung der Drosselung.",
+      "fields": {
+        "entry_id": {
+          "name": "Config-Entry-ID",
+          "description": "Optionale Speiseplan-Config-Entry-ID fuer die Aktualisierung. Ohne Angabe werden alle eingerichteten Speiseplan-Eintraege aktualisiert."
+        }
+      }
+    }
   }
 }

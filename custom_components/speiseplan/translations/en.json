@@ -66,5 +66,39 @@
       "invalid_options": "One or more options have an invalid value.",
       "invalid_update_time": "Enter the update time in HH:MM format."
     }
+  },
+  "entity": {
+    "sensor": {
+      "health": {
+        "name": "Speiseplan Health"
+      },
+      "shared_current_monday": {
+        "name": "Shared Current Week Monday"
+      },
+      "shared_current_tuesday": {
+        "name": "Shared Current Week Tuesday"
+      },
+      "shared_current_wednesday": {
+        "name": "Shared Current Week Wednesday"
+      },
+      "shared_current_thursday": {
+        "name": "Shared Current Week Thursday"
+      },
+      "shared_current_friday": {
+        "name": "Shared Current Week Friday"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Refresh meal plan",
+      "description": "Manually refresh the Kitafino meal plan, subject to throttling.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional Speiseplan config entry ID to refresh. If omitted, all configured Speiseplan entries are refreshed."
+        }
+      }
+    }
   }
 }
