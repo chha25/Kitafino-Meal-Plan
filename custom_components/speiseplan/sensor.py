@@ -31,6 +31,11 @@ class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
         """Return the stable entity ID."""
         return self._attr_entity_id
 
+    @entity_id.setter
+    def entity_id(self, value: str) -> None:
+        """Allow Home Assistant to assign the entity registry ID."""
+        self._attr_entity_id = value
+
     @property
     def unique_id(self) -> str:
         """Return the stable unique ID."""
@@ -102,6 +107,11 @@ class SpeiseplanSharedCurrentMealSensor(SensorEntity):  # type: ignore[misc]
     def entity_id(self) -> str:
         """Return the stable entity ID."""
         return self._attr_entity_id
+
+    @entity_id.setter
+    def entity_id(self, value: str) -> None:
+        """Allow Home Assistant to assign the entity registry ID."""
+        self._attr_entity_id = value
 
     @property
     def unique_id(self) -> str:

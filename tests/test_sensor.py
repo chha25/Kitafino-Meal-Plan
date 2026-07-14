@@ -279,6 +279,22 @@ def test_health_sensor_reports_snapshot_health_and_freshness_attributes() -> Non
     }
 
 
+def test_sensor_entity_ids_can_be_assigned_by_home_assistant() -> None:
+    health = SpeiseplanHealthSensor(
+        coordinator=FakeCoordinator(_snapshot(_entry("monday", "Pasta"))),
+    )
+    meal = SpeiseplanSharedCurrentMealSensor(
+        coordinator=FakeCoordinator(_snapshot(_entry("monday", "Pasta"))),
+        weekday="monday",
+    )
+
+    health.entity_id = "sensor.kitafino_health"
+    meal.entity_id = "sensor.kitafino_monday"
+
+    assert health.entity_id == "sensor.kitafino_health"
+    assert meal.entity_id == "sensor.kitafino_monday"
+
+
 def test_health_sensor_reports_stale_status_with_last_error() -> None:
     sensor = SpeiseplanHealthSensor(
         coordinator=FakeCoordinator(
