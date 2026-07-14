@@ -9,6 +9,7 @@ from typing import Any
 from .const import DOMAIN
 from .kitafino.errors import error_code
 from .models import MealPlanSnapshot
+from .operational_logging import DEFAULT_OPERATIONAL_LOGGER
 
 SERVICE_REFRESH = "refresh"
 COORDINATOR_KEY = "coordinator"
@@ -113,12 +114,18 @@ async def async_handle_manual_refresh(
     refreshed = 0
     for coordinator_entry_id, coordinator in coordinators:
         try:
-            snapshot = await coordinator.async_refresh()
+            snapshot = await coordinator.async_refresh(phase="manual_refresh")
         except Exception as err:
+            failure_code = error_code(err)
+            DEFAULT_OPERATIONAL_LOGGER.log_failure(
+                entry_id=coordinator_entry_id,
+                phase="manual_refresh",
+                failure_class=failure_code,
+            )
             errors.append(
                 {
                     "entry_id": coordinator_entry_id,
-                    "error": error_code(err),
+                    "error": failure_code,
                 }
             )
             continue

@@ -7,6 +7,10 @@ from dataclasses import replace
 
 from .kitafino.errors import error_code
 from .models import Child, HealthStatus, MealEntry, MealPlanSnapshot
+from .operational_logging import (
+    DEFAULT_OPERATIONAL_LOGGER,
+    RedactedOperationalLogger,
+)
 from .storage import SnapshotStore
 
 FetchSource = Callable[[], Awaitable[str]]
@@ -27,6 +31,8 @@ class SpeiseplanDataUpdateCoordinator:
         children: list[Child] | None = None,
         parser_version: str | None = None,
         shared_source: bool = True,
+        config_entry_id: str | None = None,
+        operational_logger: RedactedOperationalLogger | None = None,
     ) -> None:
         """Create a coordinator core with injected I/O seams."""
         self.fetch_source = fetch_source
@@ -36,6 +42,8 @@ class SpeiseplanDataUpdateCoordinator:
         self.children = list(children or [])
         self.parser_version = parser_version
         self.shared_source = shared_source
+        self.config_entry_id = config_entry_id
+        self.operational_logger = operational_logger or DEFAULT_OPERATIONAL_LOGGER
         self.snapshot: MealPlanSnapshot | None = None
 
     async def async_load_cached_snapshot(self) -> MealPlanSnapshot | None:
@@ -43,13 +51,19 @@ class SpeiseplanDataUpdateCoordinator:
         self.snapshot = await self.store.async_load()
         return self.snapshot
 
-    async def async_refresh(self) -> MealPlanSnapshot:
+    async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
         """Refresh source data and apply stale policy on failure."""
         fetched_at = self.clock()
         try:
             source = await self.fetch_source()
             entries = self.parse_source(source, fetched_at=fetched_at)
         except Exception as err:
+            failure_code = error_code(err)
+            self.operational_logger.log_failure(
+                entry_id=self.config_entry_id,
+                phase=phase,
+                failure_class=failure_code,
+            )
             snapshot = await self._snapshot_for_failure(err, fetched_at=fetched_at)
             self.snapshot = snapshot
             return snapshot

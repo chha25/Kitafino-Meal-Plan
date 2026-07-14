@@ -36,7 +36,7 @@ async def async_setup_entry(
         kitafino_transport=kitafino_transport,
     )
     await coordinator.async_load_cached_snapshot()
-    await coordinator.async_refresh()
+    await coordinator.async_refresh(phase="setup")
     hass.data[DOMAIN][entry.entry_id] = {
         "entry": entry,
         COORDINATOR_KEY: coordinator,
@@ -97,6 +97,7 @@ def build_runtime_coordinator(
         children=_children_from_options(options[OPTION_CHILDREN]),
         parser_version=parser.parser_version,
         shared_source=shared_source,
+        config_entry_id=getattr(entry, "entry_id", None),
     )
 
 

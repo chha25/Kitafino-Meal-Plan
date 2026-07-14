@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 import json
+import logging
 from typing import Any
 
+import custom_components.speiseplan.services as services_module
 from custom_components.speiseplan.const import DOMAIN, FORBIDDEN_SECRET_MARKERS
 from custom_components.speiseplan import async_setup_entry
 from custom_components.speiseplan.kitafino.errors import KitafinoCannotConnectError
 from custom_components.speiseplan.models import HealthStatus, MealEntry, MealPlanSnapshot
+from custom_components.speiseplan.operational_logging import RedactedOperationalLogger
 from custom_components.speiseplan.services import (
     COORDINATOR_KEY,
     SERVICE_REFRESH,
@@ -50,7 +53,7 @@ class FakeCoordinator:
         self.calls = 0
         self.snapshot: MealPlanSnapshot | None = None
 
-    async def async_refresh(self) -> MealPlanSnapshot:
+    async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
         self.calls += 1
         if not self.snapshots:
             raise AssertionError("No snapshot queued")
@@ -279,7 +282,7 @@ def test_manual_refresh_maps_unexpected_coordinator_exception_safely() -> None:
         snapshot = None
         calls = 0
 
-        async def async_refresh(self) -> MealPlanSnapshot:
+        async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
             self.calls += 1
             raise KitafinoCannotConnectError("RAW_KITAFINO_HTML_CAPTURE")
 
@@ -297,3 +300,42 @@ def test_manual_refresh_maps_unexpected_coordinator_exception_safely() -> None:
     assert result["refreshed"] == 0
     assert result["errors"] == [{"entry_id": "entry-1", "error": "network_error"}]
     assert "RAW_KITAFINO_HTML_CAPTURE" not in json.dumps(result, sort_keys=True)
+
+
+def test_manual_refresh_logs_unexpected_coordinator_exception_safely(
+    caplog: object,
+    monkeypatch: object,
+) -> None:
+    class RaisingCoordinator:
+        snapshot = None
+
+        async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
+            raise KitafinoCannotConnectError(
+                "RAW_KITAFINO_HTML_CAPTURE parent@example.test super-secret",
+            )
+
+    logger = logging.getLogger("speiseplan.test.services.logging")
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        services_module,
+        "DEFAULT_OPERATIONAL_LOGGER",
+        RedactedOperationalLogger(logger=logger),
+    )
+    hass = _hass_with_coordinator(RaisingCoordinator())  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):  # type: ignore[attr-defined]
+        result = _run(
+            async_handle_manual_refresh(
+                hass,
+                throttler=ManualRefreshThrottler(),
+                now=datetime(2026, 7, 12, 6, 0, tzinfo=UTC),
+            )
+        )
+
+    text = caplog.text  # type: ignore[attr-defined]
+    assert result["errors"] == [{"entry_id": "entry-1", "error": "network_error"}]
+    assert "entry_id=entry-1" in text
+    assert "phase=manual_refresh" in text
+    assert "failure_class=network_error" in text
+    assert "RAW_KITAFINO_HTML_CAPTURE" not in text
+    assert "parent@example.test" not in text
+    assert "super-secret" not in text
