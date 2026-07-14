@@ -50,6 +50,73 @@ The health sensor state is one of the integration health values such as `ok`, `s
 
 Entity states, attributes, diagnostics, and examples must not contain Kitafino credentials, cookies, raw HTML, raw request/response bodies, or account identifiers.
 
+## Optional MQTT Publishing
+
+MQTT publishing is disabled by default. When enabled in the integration options, Speiseplan publishes sanitized snapshot-derived payloads through Home Assistant's existing MQTT integration. The integration does not store or request separate broker credentials.
+
+Published topics use the stable prefix `speiseplan/{entry_id}`:
+
+- `speiseplan/{entry_id}/snapshot`
+- `speiseplan/{entry_id}/health`
+- `speiseplan/{entry_id}/meal/{source}/{week}/{day}`
+
+For the MVP shared-source meal plan, `{source}` is `shared`, `{week}` is `current`, and `{day}` is one of `monday`, `tuesday`, `wednesday`, `thursday`, or `friday`. Topic segments are sanitized before publication.
+
+MQTT messages are published with QoS `0` and retained messages disabled.
+
+Snapshot payload shape:
+
+```json
+{
+  "health": {
+    "state": "ok",
+    "last_error": null,
+    "last_successful_update": "2026-07-14T06:00:00+02:00",
+    "fetched_at": "2026-07-14T06:00:00+02:00",
+    "shared_source": true,
+    "parser_version": "kitafino-html-v1"
+  },
+  "fetched_at": "2026-07-14T06:00:00+02:00",
+  "last_successful_update": "2026-07-14T06:00:00+02:00",
+  "shared_source": true,
+  "parser_version": "kitafino-html-v1",
+  "configured_child_count": 1,
+  "entries": []
+}
+```
+
+Health payload shape:
+
+```json
+{
+  "state": "ok",
+  "last_error": null,
+  "last_successful_update": "2026-07-14T06:00:00+02:00",
+  "fetched_at": "2026-07-14T06:00:00+02:00",
+  "shared_source": true,
+  "parser_version": "kitafino-html-v1"
+}
+```
+
+Meal payload shape:
+
+```json
+{
+  "source": "shared",
+  "week": "current",
+  "day": "monday",
+  "meal_text": "Pasta",
+  "source_date": "2026-07-14",
+  "fetched_at": "2026-07-14T06:00:00+02:00",
+  "stale": false,
+  "shared_source": true,
+  "iso_year": 2026,
+  "iso_week": 29
+}
+```
+
+Payloads must not contain Kitafino username, password, cookies, tokens, raw HTML, raw request/response bodies, diagnostic dumps, sensitive headers, account IDs, or child display names. Known unsafe values are redacted before publication.
+
 ## Installation
 
 1. Add this repository as a HACS custom repository of type `Integration`.

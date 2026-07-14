@@ -25,6 +25,9 @@ from custom_components.speiseplan.models import Child, HealthStatus, MealEntry, 
 from custom_components.speiseplan.mqtt import (
     async_publish_if_enabled,
     async_publish_snapshot,
+    build_entry_payload,
+    build_entry_topic,
+    build_health_topic,
     build_snapshot_payload,
     build_snapshot_topic,
 )
@@ -138,6 +141,27 @@ def test_manifest_declares_mqtt_after_dependency() -> None:
     assert "mqtt" not in manifest["dependencies"]
 
 
+def test_readme_documents_mqtt_contract() -> None:
+    readme = (ROOT / "README.md").read_text()
+
+    for expected in (
+        "MQTT publishing is disabled by default",
+        "speiseplan/{entry_id}/snapshot",
+        "speiseplan/{entry_id}/health",
+        "speiseplan/{entry_id}/meal/{source}/{week}/{day}",
+        "QoS `0`",
+        "retained messages disabled",
+        "child display names",
+        "\"health\"",
+        "\"entries\"",
+        "\"meal_text\"",
+        "\"source_date\"",
+        "\"iso_week\"",
+        "Known unsafe values are redacted",
+    ):
+        assert expected in readme
+
+
 async def successful_transport(
     request: KitafinoTransportRequest,
 ) -> KitafinoTransportResult:
@@ -156,13 +180,97 @@ def test_mqtt_payload_is_snapshot_derived_and_redacted() -> None:
     serialized = json.dumps(payload, sort_keys=True)
 
     assert build_snapshot_topic("entry-1") == "speiseplan/entry-1/snapshot"
+    assert build_health_topic("entry-1") == "speiseplan/entry-1/health"
+    assert (
+        build_entry_topic(
+            "entry-1",
+            source="shared",
+            week="current",
+            day="monday",
+        )
+        == "speiseplan/entry-1/meal/shared/current/monday"
+    )
     assert payload["health"]["state"] == "ok"
     assert payload["configured_child_count"] == 1
     assert payload["entries"][0]["meal_text"] == "Synthetic pasta"
+    assert payload["entries"][0]["source"] == "shared"
+    assert payload["entries"][0]["week"] == "current"
+    assert payload["entries"][0]["day"] == "monday"
     assert "Private Child" not in serialized
     assert "REAL_ACCOUNT_ID_VALUE" not in serialized
     for marker in FORBIDDEN_SECRET_MARKERS:
         assert marker not in serialized
+
+
+def test_mqtt_entry_identifiers_are_sanitized() -> None:
+    entry = MealEntry(
+        child_key="REAL_ACCOUNT_ID_VALUE/private child",
+        week_kind="current",
+        iso_year=2026,
+        iso_week=29,
+        weekday="monday",
+        meal_text="Pasta",
+        source_date=None,
+        fetched_at=FETCHED_AT,
+        stale=False,
+        shared_source=False,
+    )
+
+    assert build_entry_payload(entry)["source"] == "unknown"
+    assert (
+        build_entry_topic(
+            "entry/one",
+            source=entry.child_key,
+            week=entry.week_kind,
+            day=entry.weekday,
+        )
+        == "speiseplan/entry_one/meal/unknown/current/monday"
+    )
+
+
+def test_mqtt_payload_string_fields_are_redacted_when_contaminated() -> None:
+    health = HealthStatus(
+        state="stale",
+        last_error="network_error",
+        fetched_at="cookie=REAL_SESSION_COOKIE_VALUE",
+        last_successful_update="2026-07-14T06:00:00+02:00",
+    )
+    object.__setattr__(health, "last_error", "RAW_KITAFINO_HTML_CAPTURE")
+    snapshot = MealPlanSnapshot(
+        health=health,
+        entries=[
+            MealEntry(
+                child_key="shared",
+                week_kind="current",
+                iso_year=2026,
+                iso_week=29,
+                weekday="monday",
+                meal_text="password=super-secret",
+                source_date="account_id=REAL_ACCOUNT_ID_VALUE",
+                fetched_at="token=abc",
+                stale=False,
+                shared_source=True,
+            )
+        ],
+        fetched_at="response_body=RAW_KITAFINO_HTML_CAPTURE",
+        last_successful_update="2026-07-14T06:00:00+02:00",
+        shared_source=True,
+        parser_version="raw_html parser dump",
+    )
+
+    serialized = json.dumps(build_snapshot_payload(snapshot), sort_keys=True)
+
+    assert "redacted" in serialized
+    assert "unknown_error" in serialized
+    for forbidden in (
+        "RAW_KITAFINO_HTML_CAPTURE",
+        "REAL_SESSION_COOKIE_VALUE",
+        "REAL_ACCOUNT_ID_VALUE",
+        "super-secret",
+        "token=abc",
+        "raw_html parser dump",
+    ):
+        assert forbidden not in serialized
 
 
 def test_mqtt_disabled_does_not_publish() -> None:
@@ -202,10 +310,20 @@ def test_mqtt_enabled_publishes_snapshot_payload() -> None:
         )
     )
 
-    assert result == {"published": True, "topic": "speiseplan/entry-1/snapshot"}
-    assert calls[0][1] == "speiseplan/entry-1/snapshot"
+    assert result == {
+        "published": True,
+        "topic": "speiseplan/entry-1/snapshot",
+        "topics": [
+            "speiseplan/entry-1/snapshot",
+            "speiseplan/entry-1/health",
+            "speiseplan/entry-1/meal/shared/current/monday",
+        ],
+    }
+    assert [call[1] for call in calls] == result["topics"]
     assert json.loads(calls[0][2]) == build_snapshot_payload(_snapshot())
-    assert calls[0][3:] == (0, False)
+    assert json.loads(calls[1][2]) == build_snapshot_payload(_snapshot())["health"]
+    assert json.loads(calls[2][2]) == build_snapshot_payload(_snapshot())["entries"][0]
+    assert all(call[3:] == (0, False) for call in calls)
 
 
 def test_mqtt_publish_failure_is_optional_and_redacted() -> None:
