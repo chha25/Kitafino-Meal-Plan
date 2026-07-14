@@ -4,6 +4,7 @@
   "codeowners": ["@chha25"],
   "config_flow": true,
   "dependencies": [],
+  "after_dependencies": ["mqtt"],
   "documentation": "https://github.com/chha25/Kitafino-Meal-Plan",
   "integration_type": "hub",
   "iot_class": "cloud_polling",

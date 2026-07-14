@@ -17,6 +17,7 @@ from .coordinator import SpeiseplanDataUpdateCoordinator
 from .kitafino.client import KitafinoClient, KitafinoTransport
 from .kitafino.parser import KitafinoParser
 from .models import Child
+from .mqtt import async_publish_if_enabled
 from .services import COORDINATOR_KEY, async_setup_services
 from .storage import SnapshotStore
 
@@ -36,12 +37,13 @@ async def async_setup_entry(
         kitafino_transport=kitafino_transport,
     )
     await coordinator.async_load_cached_snapshot()
-    await coordinator.async_refresh(phase="setup")
+    snapshot = await coordinator.async_refresh(phase="setup")
     hass.data[DOMAIN][entry.entry_id] = {
         "entry": entry,
         COORDINATOR_KEY: coordinator,
     }
     await async_setup_services(hass)
+    await async_publish_if_enabled(hass, entry, snapshot)
     config_entries = getattr(hass, "config_entries", None)
     forward_setups = getattr(config_entries, "async_forward_entry_setups", None)
     if callable(forward_setups):

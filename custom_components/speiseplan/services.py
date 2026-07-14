@@ -9,6 +9,7 @@ from typing import Any
 from .const import DOMAIN
 from .kitafino.errors import error_code
 from .models import MealPlanSnapshot
+from .mqtt import async_publish_if_enabled
 from .operational_logging import DEFAULT_OPERATIONAL_LOGGER
 
 SERVICE_REFRESH = "refresh"
@@ -94,7 +95,11 @@ async def async_handle_manual_refresh(
     throttler = throttler or _THROTTLER
     now = now or _utc_now()
     coordinators = _find_coordinators(hass, entry_id=entry_id)
-    throttle_key = entry_id or ",".join(entry for entry, _ in coordinators) or "global"
+    throttle_key = (
+        entry_id
+        or ",".join(current_entry_id for current_entry_id, _, _ in coordinators)
+        or "global"
+    )
     allowed, seconds_until_allowed = throttler.check_and_record(throttle_key, now)
     if not allowed:
         return _manual_refresh_result(
@@ -103,7 +108,7 @@ async def async_handle_manual_refresh(
             seconds_until_allowed=seconds_until_allowed,
             snapshots=[
                 snapshot
-                for _, coordinator in coordinators
+                for _, _, coordinator in coordinators
                 if (snapshot := getattr(coordinator, "snapshot", None)) is not None
             ],
             errors=[],
@@ -112,7 +117,7 @@ async def async_handle_manual_refresh(
     snapshots: list[MealPlanSnapshot] = []
     errors: list[dict[str, str]] = []
     refreshed = 0
-    for coordinator_entry_id, coordinator in coordinators:
+    for coordinator_entry_id, entry, coordinator in coordinators:
         try:
             snapshot = await coordinator.async_refresh(phase="manual_refresh")
         except Exception as err:
@@ -132,6 +137,8 @@ async def async_handle_manual_refresh(
 
         refreshed += 1
         snapshots.append(snapshot)
+        if entry is not None:
+            await async_publish_if_enabled(hass, entry, snapshot)
 
     return _manual_refresh_result(
         refreshed=refreshed,
@@ -142,7 +149,7 @@ async def async_handle_manual_refresh(
     )
 
 
-def _find_coordinators(hass: Any, *, entry_id: str | None) -> list[tuple[str, Any]]:
+def _find_coordinators(hass: Any, *, entry_id: str | None) -> list[tuple[str, Any, Any]]:
     """Return configured coordinators from Home Assistant domain data."""
     domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
     if not isinstance(domain_data, dict):
@@ -153,7 +160,7 @@ def _find_coordinators(hass: Any, *, entry_id: str | None) -> list[tuple[str, An
         if entry_id is not None
         else list(domain_data.items())
     )
-    coordinators: list[tuple[str, Any]] = []
+    coordinators: list[tuple[str, Any, Any]] = []
     for current_entry_id, entry_data in entry_items:
         if current_entry_id == SERVICES_REGISTERED_KEY:
             continue
@@ -161,7 +168,9 @@ def _find_coordinators(hass: Any, *, entry_id: str | None) -> list[tuple[str, An
             continue
         coordinator = entry_data.get(COORDINATOR_KEY)
         if coordinator is not None:
-            coordinators.append((current_entry_id, coordinator))
+            coordinators.append(
+                (current_entry_id, entry_data.get("entry"), coordinator)
+            )
 
     return coordinators
 
