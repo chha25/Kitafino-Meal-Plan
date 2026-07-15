@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 from .models import MealPlanSnapshot
@@ -17,7 +18,7 @@ class SnapshotStore:
 
     async def async_save(self, snapshot: MealPlanSnapshot) -> None:
         """Persist a sanitized snapshot dictionary."""
-        self.raw_data = deepcopy(snapshot.to_dict())
+        self.raw_data = deepcopy(replace(snapshot, children=[]).to_dict())
 
     async def async_load(self) -> MealPlanSnapshot | None:
         """Load a sanitized snapshot, if present."""

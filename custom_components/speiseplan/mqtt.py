@@ -13,6 +13,7 @@ MQTT_TOPIC_PREFIX = "speiseplan"
 MQTT_RETAIN = False
 MQTT_QOS = 0
 SAFE_TOPIC_SEGMENT_PATTERN = re.compile(r"[^a-zA-Z0-9_-]+")
+EMAIL_PATTERN = re.compile(r"\b[^@\s]+@[^@\s]+\.[^@\s]+\b")
 MAX_TOPIC_SEGMENT_LENGTH = 64
 REDACTED_VALUE = "redacted"
 
@@ -35,6 +36,34 @@ async def async_publish_if_enabled(
         hass,
         entry_id=getattr(entry, "entry_id", None),
         snapshot=snapshot,
+        publisher=publisher,
+    )
+
+
+async def async_schedule_publish_if_enabled(
+    hass: Any,
+    entry: Any,
+    snapshot: MealPlanSnapshot | None,
+    *,
+    publisher: Any | None = None,
+) -> dict[str, Any]:
+    """Schedule optional MQTT publishing without blocking HA setup paths."""
+    create_task = getattr(hass, "async_create_task", None)
+    if callable(create_task):
+        create_task(
+            async_publish_if_enabled(
+                hass,
+                entry,
+                snapshot,
+                publisher=publisher,
+            )
+        )
+        return {"published": False, "reason": "scheduled"}
+
+    return await async_publish_if_enabled(
+        hass,
+        entry,
+        snapshot,
         publisher=publisher,
     )
 
@@ -206,14 +235,19 @@ def _safe_payload_string(value: str | None) -> str | None:
         marker in lowered
         for marker in (
             "password",
+            "passwort",
             "cookie",
+            "secret",
             "token",
             "raw_html",
             "account_id",
+            "credential",
             "request_body",
             "response_body",
         )
     ):
+        return REDACTED_VALUE
+    if EMAIL_PATTERN.search(value):
         return REDACTED_VALUE
     return value
 

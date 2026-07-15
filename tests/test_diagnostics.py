@@ -162,10 +162,10 @@ def test_diagnostics_include_redacted_options_and_runtime_snapshot() -> None:
                 shared_source=True,
             )
         ],
-        fetched_at="2026-07-14T06:05:00+02:00",
+        fetched_at="parent@example.test",
         last_successful_update="2026-07-14T06:00:00+02:00",
         shared_source=True,
-        parser_version="kitafino-html-v1",
+        parser_version="raw_html parser dump",
     )
     entry = SimpleNamespace(
         entry_id="entry-1",
@@ -194,6 +194,7 @@ def test_diagnostics_include_redacted_options_and_runtime_snapshot() -> None:
     serialized = str(diagnostics)
 
     assert diagnostics["update_time"] == "06:00"
+    assert diagnostics["version"] == "0.1.0"
     assert diagnostics["mqtt_enabled"] is True
     assert diagnostics["configured_child_count"] == 1
     assert diagnostics["runtime"] == {
@@ -205,8 +206,8 @@ def test_diagnostics_include_redacted_options_and_runtime_snapshot() -> None:
             "fetched_at": "2026-07-14T06:05:00+02:00",
         },
         "last_successful_update": "2026-07-14T06:00:00+02:00",
-        "fetched_at": "2026-07-14T06:05:00+02:00",
-        "parser_version": "kitafino-html-v1",
+        "fetched_at": "redacted",
+        "parser_version": "redacted",
         "entry_count": 1,
         "configured_child_count": 1,
         "shared_source": True,

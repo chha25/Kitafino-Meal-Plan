@@ -25,6 +25,7 @@ from custom_components.speiseplan.models import Child, HealthStatus, MealEntry, 
 from custom_components.speiseplan.mqtt import (
     async_publish_if_enabled,
     async_publish_snapshot,
+    async_schedule_publish_if_enabled,
     build_entry_payload,
     build_entry_topic,
     build_health_topic,
@@ -245,9 +246,9 @@ def test_mqtt_payload_string_fields_are_redacted_when_contaminated() -> None:
                 iso_year=2026,
                 iso_week=29,
                 weekday="monday",
-                meal_text="password=super-secret",
+                meal_text="super-secret",
                 source_date="account_id=REAL_ACCOUNT_ID_VALUE",
-                fetched_at="token=abc",
+                fetched_at="parent@example.test",
                 stale=False,
                 shared_source=True,
             )
@@ -267,7 +268,7 @@ def test_mqtt_payload_string_fields_are_redacted_when_contaminated() -> None:
         "REAL_SESSION_COOKIE_VALUE",
         "REAL_ACCOUNT_ID_VALUE",
         "super-secret",
-        "token=abc",
+        "parent@example.test",
         "raw_html parser dump",
     ):
         assert forbidden not in serialized
@@ -287,6 +288,24 @@ def test_mqtt_disabled_does_not_publish() -> None:
 
     assert result == {"published": False, "reason": "disabled"}
     assert calls == []
+
+
+def test_mqtt_scheduler_uses_home_assistant_task_when_available() -> None:
+    scheduled: list[Any] = []
+    hass = FakeHass()
+    hass.async_create_task = scheduled.append  # type: ignore[attr-defined]
+
+    result = _run(
+        async_schedule_publish_if_enabled(
+            hass,
+            FakeEntry(mqtt_enabled=True),
+            _snapshot(),
+        )
+    )
+
+    assert result == {"published": False, "reason": "scheduled"}
+    assert len(scheduled) == 1
+    scheduled[0].close()
 
 
 def test_mqtt_enabled_publishes_snapshot_payload() -> None:
@@ -367,7 +386,7 @@ def test_setup_publishes_once_when_mqtt_enabled(monkeypatch: object) -> None:
 
     monkeypatch.setattr(  # type: ignore[attr-defined]
         integration_module,
-        "async_publish_if_enabled",
+        "async_schedule_publish_if_enabled",
         fake_publish,
     )
     hass = FakeHass()
@@ -399,7 +418,7 @@ def test_setup_keeps_entities_when_optional_mqtt_publish_fails(
 
     monkeypatch.setattr(  # type: ignore[attr-defined]
         integration_module,
-        "async_publish_if_enabled",
+        "async_schedule_publish_if_enabled",
         failing_publish,
     )
     hass = FakeHass()
@@ -430,7 +449,7 @@ def test_manual_refresh_publishes_when_entry_mqtt_enabled(monkeypatch: object) -
 
     monkeypatch.setattr(  # type: ignore[attr-defined]
         services_module,
-        "async_publish_if_enabled",
+        "async_schedule_publish_if_enabled",
         fake_publish,
     )
     hass = SimpleNamespace(

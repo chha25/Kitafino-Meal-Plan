@@ -87,10 +87,15 @@ def test_successful_refresh_stores_fresh_snapshot_and_sanitized_cache() -> None:
     assert snapshot.parser_version == "kitafino-html-v1"
 
     cached = _run(store.async_load())
-    assert cached == snapshot
+    assert cached is not None
+    assert cached.children == []
+    assert cached.entries == snapshot.entries
+    assert cached.health == snapshot.health
     serialized_cache = json.dumps(store.raw_data, sort_keys=True)
     assert RAW_HTML not in serialized_cache
     assert "parent@example.test" not in serialized_cache
+    assert "Kind 1" not in serialized_cache
+    assert "kind_1" not in serialized_cache
 
 
 @pytest.mark.parametrize(

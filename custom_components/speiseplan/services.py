@@ -9,7 +9,7 @@ from typing import Any
 from .const import DOMAIN
 from .kitafino.errors import error_code
 from .models import MealPlanSnapshot
-from .mqtt import async_publish_if_enabled
+from .mqtt import async_schedule_publish_if_enabled, build_snapshot_payload
 from .operational_logging import DEFAULT_OPERATIONAL_LOGGER
 
 SERVICE_REFRESH = "refresh"
@@ -137,8 +137,12 @@ async def async_handle_manual_refresh(
 
         refreshed += 1
         snapshots.append(snapshot)
-        if entry is not None:
-            await async_publish_if_enabled(hass, entry, snapshot)
+        if entry is not None and getattr(
+            coordinator,
+            "snapshot_update_callback",
+            None,
+        ) is None:
+            await async_schedule_publish_if_enabled(hass, entry, snapshot)
 
     return _manual_refresh_result(
         refreshed=refreshed,
@@ -188,6 +192,6 @@ def _manual_refresh_result(
         "refreshed": refreshed,
         "throttled": throttled,
         "seconds_until_allowed": seconds_until_allowed,
-        "snapshots": [snapshot.to_dict() for snapshot in snapshots],
+        "snapshots": [build_snapshot_payload(snapshot) for snapshot in snapshots],
         "errors": errors,
     }

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
+    FORBIDDEN_SECRET_MARKERS,
     OPTION_CHILDREN,
     OPTION_MQTT_ENABLED,
     OPTION_SHARED_SOURCE,
@@ -15,7 +18,21 @@ from .const import (
 )
 from .kitafino.errors import ERROR_UNKNOWN
 from .models import ERROR_CODES, MealPlanSnapshot
+from .mqtt import REDACTED_VALUE
 from .services import COORDINATOR_KEY
+
+SENSITIVE_DIAGNOSTIC_TERMS = (
+    "password",
+    "passwort",
+    "cookie",
+    "secret",
+    "token",
+    "raw_html",
+    "account_id",
+    "credential",
+    "request_body",
+    "response_body",
+)
 
 
 async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str, Any]:
@@ -37,6 +54,7 @@ async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str,
 
     return {
         "domain": "speiseplan",
+        "version": _integration_version(),
         "entry_id_present": bool(getattr(entry, "entry_id", None)),
         "username_configured": bool(data.get(CONF_USERNAME)),
         "password_configured": bool(data.get(CONF_PASSWORD)),
@@ -87,13 +105,43 @@ def _snapshot_diagnostics(snapshot: MealPlanSnapshot | None) -> dict[str, Any]:
                 if snapshot.health.last_error in ERROR_CODES
                 else ERROR_UNKNOWN
             ),
-            "last_successful_update": snapshot.health.last_successful_update,
-            "fetched_at": snapshot.health.fetched_at,
+            "last_successful_update": _safe_diagnostic_string(
+                snapshot.health.last_successful_update
+            ),
+            "fetched_at": _safe_diagnostic_string(snapshot.health.fetched_at),
         },
-        "last_successful_update": snapshot.last_successful_update,
-        "fetched_at": snapshot.fetched_at,
-        "parser_version": snapshot.parser_version,
+        "last_successful_update": _safe_diagnostic_string(
+            snapshot.last_successful_update
+        ),
+        "fetched_at": _safe_diagnostic_string(snapshot.fetched_at),
+        "parser_version": _safe_diagnostic_string(snapshot.parser_version),
         "entry_count": len(snapshot.entries),
         "configured_child_count": len(snapshot.children),
         "shared_source": snapshot.shared_source,
     }
+
+
+def _integration_version() -> str | None:
+    """Read integration version from the manifest."""
+    manifest_path = Path(__file__).with_name("manifest.json")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    version = manifest.get("version")
+    return version if isinstance(version, str) else None
+
+
+def _safe_diagnostic_string(value: str | None) -> str | None:
+    """Return a diagnostics string only when it has no sensitive markers."""
+    if value is None:
+        return None
+    if any(marker in value for marker in FORBIDDEN_SECRET_MARKERS):
+        return REDACTED_VALUE
+    lowered = value.lower()
+    if any(term in lowered for term in SENSITIVE_DIAGNOSTIC_TERMS):
+        return REDACTED_VALUE
+    if "@" in value:
+        return REDACTED_VALUE
+    return value

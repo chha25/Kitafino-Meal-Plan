@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any
 
-from custom_components.speiseplan import PLATFORMS, async_setup_entry
+from custom_components.speiseplan import PLATFORMS, async_setup_entry, async_unload_entry
 from custom_components.speiseplan.const import (
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -44,7 +44,9 @@ class FakeConfigEntries:
     def __init__(self, hass: "FakeHass") -> None:
         self.hass = hass
         self.forwarded: list[tuple[Any, tuple[str, ...]]] = []
+        self.unloaded: list[tuple[Any, tuple[str, ...]]] = []
         self.coordinator_was_present_on_forward = False
+        self.unload_result = True
 
     async def async_forward_entry_setups(
         self,
@@ -55,6 +57,14 @@ class FakeConfigEntries:
             COORDINATOR_KEY in self.hass.data[DOMAIN][entry.entry_id]
         )
         self.forwarded.append((entry, platforms))
+
+    async def async_unload_platforms(
+        self,
+        entry: Any,
+        platforms: tuple[str, ...],
+    ) -> bool:
+        self.unloaded.append((entry, platforms))
+        return self.unload_result
 
 
 class FakeServices:
@@ -231,3 +241,39 @@ def test_runtime_setup_public_state_contains_no_secret_markers() -> None:
     assert "cookie" not in serialized.lower()
     assert "raw_html" not in serialized.lower()
     assert "account_id" not in serialized.lower()
+
+
+def test_unload_entry_unloads_sensor_platform_before_removing_data() -> None:
+    hass = FakeHass()
+    entry = FakeEntry()
+    _run(
+        async_setup_entry(
+            hass,
+            entry,
+            kitafino_transport=successful_transport,
+        )
+    )
+
+    result = _run(async_unload_entry(hass, entry))
+
+    assert result is True
+    assert hass.config_entries.unloaded == [(entry, PLATFORMS)]
+    assert entry.entry_id not in hass.data[DOMAIN]
+
+
+def test_failed_platform_unload_preserves_entry_data() -> None:
+    hass = FakeHass()
+    entry = FakeEntry()
+    _run(
+        async_setup_entry(
+            hass,
+            entry,
+            kitafino_transport=successful_transport,
+        )
+    )
+    hass.config_entries.unload_result = False
+
+    result = _run(async_unload_entry(hass, entry))
+
+    assert result is False
+    assert entry.entry_id in hass.data[DOMAIN]

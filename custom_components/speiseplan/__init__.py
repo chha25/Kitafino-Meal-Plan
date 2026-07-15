@@ -17,7 +17,7 @@ from .coordinator import SpeiseplanDataUpdateCoordinator
 from .kitafino.client import KitafinoClient, KitafinoTransport
 from .kitafino.parser import KitafinoParser
 from .models import Child
-from .mqtt import async_publish_if_enabled
+from .mqtt import async_schedule_publish_if_enabled
 from .services import COORDINATOR_KEY, async_setup_services
 from .storage import SnapshotStore
 
@@ -43,16 +43,30 @@ async def async_setup_entry(
         COORDINATOR_KEY: coordinator,
     }
     await async_setup_services(hass)
-    await async_publish_if_enabled(hass, entry, snapshot)
     config_entries = getattr(hass, "config_entries", None)
     forward_setups = getattr(config_entries, "async_forward_entry_setups", None)
     if callable(forward_setups):
         await forward_setups(entry, PLATFORMS)
+    coordinator.snapshot_update_callback = (
+        lambda updated_snapshot: async_schedule_publish_if_enabled(
+            hass,
+            entry,
+            updated_snapshot,
+        )
+    )
+    await async_schedule_publish_if_enabled(hass, entry, snapshot)
     return True
 
 
 async def async_unload_entry(hass: Any, entry: Any) -> bool:
     """Unload a Speiseplan config entry."""
+    config_entries = getattr(hass, "config_entries", None)
+    unload_platforms = getattr(config_entries, "async_unload_platforms", None)
+    if callable(unload_platforms):
+        unload_ok = await unload_platforms(entry, PLATFORMS)
+        if not unload_ok:
+            return False
+
     domain_data = hass.data.get(DOMAIN, {})
     domain_data.pop(entry.entry_id, None)
     return True

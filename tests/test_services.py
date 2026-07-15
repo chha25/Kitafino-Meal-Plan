@@ -13,6 +13,7 @@ from custom_components.speiseplan.const import DOMAIN, FORBIDDEN_SECRET_MARKERS
 from custom_components.speiseplan import async_setup_entry
 from custom_components.speiseplan.kitafino.errors import KitafinoCannotConnectError
 from custom_components.speiseplan.models import HealthStatus, MealEntry, MealPlanSnapshot
+from custom_components.speiseplan.mqtt import build_snapshot_payload
 from custom_components.speiseplan.operational_logging import RedactedOperationalLogger
 from custom_components.speiseplan.services import (
     COORDINATOR_KEY,
@@ -163,7 +164,7 @@ def test_manual_refresh_delegates_to_coordinator_and_returns_sanitized_snapshot(
     assert coordinator.calls == 1
     assert result["refreshed"] == 1
     assert result["throttled"] is False
-    assert result["snapshots"] == [_ok_snapshot().to_dict()]
+    assert result["snapshots"] == [build_snapshot_payload(_ok_snapshot())]
 
 
 def test_manual_refresh_ignores_internal_domain_data_keys() -> None:
@@ -251,7 +252,7 @@ def test_throttled_refresh_does_not_hide_existing_snapshot() -> None:
     )
 
     assert result["throttled"] is True
-    assert result["snapshots"] == [_ok_snapshot().to_dict()]
+    assert result["snapshots"] == [build_snapshot_payload(_ok_snapshot())]
     assert coordinator.calls == 1
 
 

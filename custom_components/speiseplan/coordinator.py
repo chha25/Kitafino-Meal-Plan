@@ -16,6 +16,7 @@ from .storage import SnapshotStore
 FetchSource = Callable[[], Awaitable[str]]
 ParseSource = Callable[[str], list[MealEntry]]
 Clock = Callable[[], str]
+SnapshotUpdateCallback = Callable[[MealPlanSnapshot], Awaitable[None]]
 
 
 class SpeiseplanDataUpdateCoordinator:
@@ -33,6 +34,7 @@ class SpeiseplanDataUpdateCoordinator:
         shared_source: bool = True,
         config_entry_id: str | None = None,
         operational_logger: RedactedOperationalLogger | None = None,
+        snapshot_update_callback: SnapshotUpdateCallback | None = None,
     ) -> None:
         """Create a coordinator core with injected I/O seams."""
         self.fetch_source = fetch_source
@@ -44,6 +46,7 @@ class SpeiseplanDataUpdateCoordinator:
         self.shared_source = shared_source
         self.config_entry_id = config_entry_id
         self.operational_logger = operational_logger or DEFAULT_OPERATIONAL_LOGGER
+        self.snapshot_update_callback = snapshot_update_callback
         self.snapshot: MealPlanSnapshot | None = None
 
     async def async_load_cached_snapshot(self) -> MealPlanSnapshot | None:
@@ -66,6 +69,7 @@ class SpeiseplanDataUpdateCoordinator:
             )
             snapshot = await self._snapshot_for_failure(err, fetched_at=fetched_at)
             self.snapshot = snapshot
+            await self._async_notify_snapshot_update(snapshot)
             return snapshot
 
         snapshot = MealPlanSnapshot(
@@ -84,7 +88,16 @@ class SpeiseplanDataUpdateCoordinator:
         )
         self.snapshot = snapshot
         await self.store.async_save(snapshot)
+        await self._async_notify_snapshot_update(snapshot)
         return snapshot
+
+    async def _async_notify_snapshot_update(
+        self,
+        snapshot: MealPlanSnapshot,
+    ) -> None:
+        """Notify an optional projection hook after snapshot state changes."""
+        if self.snapshot_update_callback is not None:
+            await self.snapshot_update_callback(snapshot)
 
     async def _snapshot_for_failure(
         self,
