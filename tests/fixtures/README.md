@@ -11,5 +11,6 @@ Never commit:
 - child-identifying data
 - request bodies
 - response bodies
+- Home Assistant secrets
 
 Use small synthetic HTML snippets that preserve only the structure needed by parser tests.
