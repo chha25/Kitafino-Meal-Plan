@@ -16,7 +16,7 @@ CredentialValidator = Callable[[str, str], Awaitable[None]]
 KitafinoTransport = Callable[["KitafinoTransportRequest"], Awaitable["KitafinoTransportResult"]]
 
 LOGIN_URL = "https://auth.kitafino.de/sys_k2/index.php?action=do_login"
-MEAL_PLAN_URL = "https://app.kitafino.de/sys_k2/index.php?action=bestellen"
+MEAL_PLAN_URL = "https://user.kitafino.de/sys_k2/index.php?action=bestellen"
 USER_AGENT = "Mozilla/5.0 (Home Assistant Kitafino Meal Plan)"
 TIMEOUT_SECONDS = 15
 

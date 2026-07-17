@@ -78,7 +78,7 @@ def test_fetch_meal_plan_source_logs_in_and_returns_source_text() -> None:
             username=USERNAME,
             password=PASSWORD,
             login_url="https://auth.kitafino.de/sys_k2/index.php?action=do_login",
-            meal_plan_url=MEAL_PLAN_URL,
+            meal_plan_url="https://user.kitafino.de/sys_k2/index.php?action=bestellen",
             fetch_source=True,
         )
     ]
