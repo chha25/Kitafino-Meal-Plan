@@ -15,6 +15,7 @@ from custom_components.speiseplan.kitafino.client import (
 from custom_components.speiseplan.kitafino.errors import (
     KitafinoCannotConnectError,
     KitafinoInvalidAuthError,
+    error_code,
 )
 
 
@@ -105,19 +106,37 @@ def test_validate_credentials_uses_login_only_transport_request() -> None:
 
 
 @pytest.mark.parametrize(
-    "result",
+    ("result", "stage", "reason", "status"),
     [
-        _result(login_status=401),
-        _result(login_status=403),
-        _result(login_url="https://auth.kitafino.de/sys_k2/index.php?action=login"),
-        _result(login_text='<input name="passwort" type="password">'),
-        _result(source_status=401),
-        _result(source_status=403),
-        _result(source_url="https://auth.kitafino.de/sys_k2/index.php?action=login"),
+        (_result(login_status=401), "login", "http_status", 401),
+        (_result(login_status=403), "login", "http_status", 403),
+        (
+            _result(login_url="https://auth.kitafino.de/sys_k2/index.php?action=login"),
+            "login",
+            "login_page",
+            200,
+        ),
+        (
+            _result(login_text='<input name="passwort" type="password">'),
+            "login",
+            "login_page",
+            200,
+        ),
+        (_result(source_status=401), "meal_plan", "http_status", 401),
+        (_result(source_status=403), "meal_plan", "http_status", 403),
+        (
+            _result(source_url="https://auth.kitafino.de/sys_k2/index.php?action=login"),
+            "meal_plan",
+            "login_page",
+            200,
+        ),
     ],
 )
 def test_fetch_maps_login_or_authenticated_access_failure_to_invalid_auth(
     result: KitafinoTransportResult,
+    stage: str,
+    reason: str,
+    status: int,
 ) -> None:
     client = KitafinoClient(USERNAME, PASSWORD, transport=FakeTransport(result))
 
@@ -126,6 +145,12 @@ def test_fetch_maps_login_or_authenticated_access_failure_to_invalid_auth(
 
     assert USERNAME not in str(err.value)
     assert PASSWORD not in str(err.value)
+    assert (err.value.stage, err.value.reason, err.value.http_status) == (
+        stage,
+        reason,
+        status,
+    )
+    assert error_code(err.value) == "login_failed"
 
 
 @pytest.mark.parametrize(
@@ -248,7 +273,12 @@ def test_fetch_rejects_blank_credentials_before_transport_call() -> None:
     transport = FakeTransport(_result())
     client = KitafinoClient(" ", PASSWORD, transport=transport)
 
-    with pytest.raises(KitafinoInvalidAuthError):
+    with pytest.raises(KitafinoInvalidAuthError) as err:
         asyncio.run(client.async_fetch_meal_plan_source())
 
     assert transport.requests == []
+    assert (err.value.stage, err.value.reason, err.value.http_status) == (
+        None,
+        None,
+        None,
+    )

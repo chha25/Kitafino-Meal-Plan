@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import pytest
+
 from custom_components.speiseplan.coordinator import SpeiseplanDataUpdateCoordinator
 from custom_components.speiseplan.kitafino.errors import (
     KitafinoCannotConnectError,
@@ -30,6 +32,19 @@ class UnsafeDiagnosticValue:
 
     def __eq__(self, other: object) -> bool:
         return other in ("login", "timeout")
+
+    def __str__(self) -> str:
+        return "REAL_SESSION_COOKIE_VALUE"
+
+
+class UnhashableAllowedString(str):
+    """Look like an allowed string while remaining unsafe for deduplication keys."""
+
+    __hash__ = None
+
+
+class UnsafeAllowedStatus(int):
+    """Compare like an allowed status while rendering unsafe text."""
 
     def __str__(self) -> str:
         return "REAL_SESSION_COOKIE_VALUE"
@@ -124,6 +139,35 @@ def test_connection_error_rejects_non_string_allowlist_lookalikes() -> None:
     assert error.reason is None
 
 
+@pytest.mark.parametrize(
+    ("stage", "reason", "status"),
+    [
+        ("transport", "login_page", 200),
+        (UnhashableAllowedString("login"), "login_page", 200),
+        ("login", "http_status", UnsafeAllowedStatus(401)),
+        ("login", "login_page", 500),
+        ("login", "http_status", 500),
+        ("login", "http_status", True),
+        ("login", "http_status", None),
+        ("login", "timeout", 401),
+    ],
+)
+def test_auth_error_normalizes_invalid_tuple_atomically(
+    stage: object,
+    reason: object,
+    status: object,
+) -> None:
+    error = KitafinoInvalidAuthError(
+        "legacy message",
+        stage=stage,  # type: ignore[arg-type]
+        reason=reason,  # type: ignore[arg-type]
+        http_status=status,  # type: ignore[arg-type]
+    )
+
+    assert str(error) == "legacy message"
+    assert (error.stage, error.reason, error.http_status) == (None, None, None)
+
+
 def test_refresh_failure_logs_class_without_secret_details(
     caplog: object,
 ) -> None:
@@ -166,6 +210,79 @@ def test_refresh_failure_logs_safe_network_diagnostics(caplog: object) -> None:
     assert "failure_reason=http_status" in text
     assert "http_status=503" in text
     assert "never log this" not in text
+
+
+def test_refresh_failure_logs_safe_auth_diagnostics(caplog: object) -> None:
+    logger = logging.getLogger("speiseplan.test.logging.auth-diagnostics")
+    coordinator = _coordinator_with_error(
+        KitafinoInvalidAuthError(
+            "parent@example.test cookie=REAL_SESSION_COOKIE_VALUE",
+            stage="meal_plan",
+            reason="login_page",
+            http_status=200,
+        ),
+        logger=logger,
+    )
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):  # type: ignore[attr-defined]
+        snapshot = _run(coordinator.async_refresh())
+
+    text = caplog.text  # type: ignore[attr-defined]
+    assert snapshot.health.state == "login_failed"
+    assert "failure_class=login_failed" in text
+    assert "request_stage=meal_plan" in text
+    assert "failure_reason=login_page" in text
+    assert "http_status=200" in text
+    assert "parent@example.test" not in text
+    assert "REAL_SESSION_COOKIE_VALUE" not in text
+
+
+@pytest.mark.parametrize(
+    ("failure_class", "stage", "reason", "status"),
+    [
+        ("login_failed", "transport", "login_page", 200),
+        (
+            "login_failed",
+            UnhashableAllowedString("login"),
+            "login_page",
+            200,
+        ),
+        (
+            "login_failed",
+            "login",
+            "http_status",
+            UnsafeAllowedStatus(401),
+        ),
+        ("login_failed", "login", "login_page", 500),
+        ("login_failed", "login", "http_status", 500),
+        ("network_error", "login", "http_status", 401),
+        ("network_error", "meal_plan", "missing_content", 200),
+    ],
+)
+def test_logger_normalizes_incoherent_tuple_atomically(
+    caplog: object,
+    failure_class: str,
+    stage: str,
+    reason: str,
+    status: int,
+) -> None:
+    logger = logging.getLogger("speiseplan.test.logging.atomic-normalize")
+    operational_logger = RedactedOperationalLogger(logger=logger)
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):  # type: ignore[attr-defined]
+        operational_logger.log_failure(
+            entry_id="entry-1",
+            phase="setup",
+            failure_class=failure_class,
+            request_stage=stage,
+            failure_reason=reason,
+            http_status=status,
+        )
+
+    text = caplog.text  # type: ignore[attr-defined]
+    assert "request_stage=unknown" in text
+    assert "failure_reason=unknown" in text
+    assert "http_status=none" in text
 
 
 def test_setup_refresh_failure_logs_setup_phase(caplog: object) -> None:
@@ -279,3 +396,36 @@ def test_distinct_safe_diagnostics_are_not_deduplicated(caplog: object) -> None:
             )
 
     assert caplog.text.count("failure_class=network_error") == 2  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("stage", "reason"),
+    [
+        ("login", "timeout"),
+        ("meal_plan", "transport"),
+        ("transport", "timeout"),
+        ("meal_plan", "incomplete_response"),
+        ("meal_plan", "missing_content"),
+    ],
+)
+def test_logger_retains_established_network_diagnostics(
+    caplog: object,
+    stage: str,
+    reason: str,
+) -> None:
+    logger = logging.getLogger(f"speiseplan.test.logging.network.{stage}.{reason}")
+    operational_logger = RedactedOperationalLogger(logger=logger)
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):  # type: ignore[attr-defined]
+        operational_logger.log_failure(
+            entry_id="entry-1",
+            phase="setup",
+            failure_class="network_error",
+            request_stage=stage,
+            failure_reason=reason,
+        )
+
+    text = caplog.text  # type: ignore[attr-defined]
+    assert f"request_stage={stage}" in text
+    assert f"failure_reason={reason}" in text
+    assert "http_status=none" in text

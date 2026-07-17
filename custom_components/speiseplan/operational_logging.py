@@ -65,24 +65,15 @@ class RedactedOperationalLogger:
             if failure_class in SAFE_FAILURE_CLASSES
             else ERROR_UNKNOWN
         )
-        safe_request_stage = (
-            request_stage
-            if isinstance(request_stage, str)
-            and request_stage in SAFE_REQUEST_STAGES
-            else "unknown"
-        )
-        safe_failure_reason = (
-            failure_reason
-            if isinstance(failure_reason, str)
-            and failure_reason in SAFE_FAILURE_REASONS
-            else "unknown"
-        )
-        safe_http_status = (
-            http_status
-            if isinstance(http_status, int)
-            and not isinstance(http_status, bool)
-            and 100 <= http_status <= 599
-            else None
+        (
+            safe_request_stage,
+            safe_failure_reason,
+            safe_http_status,
+        ) = _safe_diagnostics(
+            safe_failure_class,
+            request_stage,
+            failure_reason,
+            http_status,
         )
         key = (
             safe_entry_id,
@@ -121,6 +112,59 @@ def _safe_entry_id(entry_id: str | None) -> str:
     if not SAFE_ENTRY_ID_PATTERN.fullmatch(entry_id):
         return "unknown"
     return entry_id
+
+
+def _safe_diagnostics(
+    failure_class: str,
+    request_stage: object,
+    failure_reason: object,
+    http_status: object,
+) -> tuple[str, str, int | None]:
+    """Return a coherent failure-class-specific tuple or no evidence."""
+    unknown = ("unknown", "unknown", None)
+    if type(request_stage) is not str or request_stage not in SAFE_REQUEST_STAGES:
+        return unknown
+    if type(failure_reason) is not str or failure_reason not in SAFE_FAILURE_REASONS:
+        return unknown
+    safe_status = (
+        http_status
+        if type(http_status) is int and 100 <= http_status <= 599
+        else None
+    )
+
+    if failure_class == ERROR_LOGIN_FAILED:
+        if (
+            request_stage in ("login", "meal_plan")
+            and failure_reason == "http_status"
+            and safe_status in (401, 403)
+        ):
+            return request_stage, failure_reason, safe_status
+        if (
+            request_stage in ("login", "meal_plan")
+            and failure_reason == "login_page"
+            and safe_status == 200
+        ):
+            return request_stage, failure_reason, safe_status
+        return unknown
+
+    if failure_class != ERROR_NETWORK:
+        return unknown
+    if failure_reason in ("timeout", "transport") and http_status is None:
+        return request_stage, failure_reason, None
+    if (
+        request_stage in ("login", "meal_plan")
+        and failure_reason == "http_status"
+        and safe_status is not None
+        and safe_status not in (200, 401, 403)
+    ):
+        return request_stage, failure_reason, safe_status
+    if (
+        request_stage == "meal_plan"
+        and failure_reason in ("incomplete_response", "missing_content")
+        and http_status is None
+    ):
+        return request_stage, failure_reason, None
+    return unknown
 
 
 DEFAULT_OPERATIONAL_LOGGER = RedactedOperationalLogger()

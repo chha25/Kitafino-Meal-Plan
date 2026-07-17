@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
-from .kitafino.errors import KitafinoCannotConnectError, error_code
+from .kitafino.errors import (
+    KitafinoCannotConnectError,
+    KitafinoInvalidAuthError,
+    error_code,
+)
 from .models import Child, HealthStatus, MealEntry, MealPlanSnapshot
 from .operational_logging import (
     DEFAULT_OPERATIONAL_LOGGER,
@@ -68,7 +72,10 @@ class SpeiseplanDataUpdateCoordinator:
                     "failure_reason": err.reason,
                     "http_status": err.http_status,
                 }
-                if isinstance(err, KitafinoCannotConnectError)
+                if isinstance(
+                    err,
+                    (KitafinoCannotConnectError, KitafinoInvalidAuthError),
+                )
                 else {}
             )
             self.operational_logger.log_failure(

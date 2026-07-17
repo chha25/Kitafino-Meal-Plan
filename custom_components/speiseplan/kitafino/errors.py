@@ -9,6 +9,7 @@ FailureReason = Literal[
     "timeout",
     "transport",
     "http_status",
+    "login_page",
     "incomplete_response",
     "missing_content",
 ]
@@ -18,6 +19,7 @@ SAFE_FAILURE_REASONS = (
     "timeout",
     "transport",
     "http_status",
+    "login_page",
     "incomplete_response",
     "missing_content",
 )
@@ -29,6 +31,18 @@ class KitafinoError(Exception):
 
 class KitafinoInvalidAuthError(KitafinoError):
     """Credentials were rejected by Kitafino."""
+
+    def __init__(
+        self,
+        *args: object,
+        stage: RequestStage | None = None,
+        reason: FailureReason | None = None,
+        http_status: int | None = None,
+    ) -> None:
+        """Keep legacy arguments and accept only coherent auth diagnostics."""
+        super().__init__(*args)
+        diagnostics = _safe_auth_diagnostics(stage, reason, http_status)
+        self.stage, self.reason, self.http_status = diagnostics
 
 
 class KitafinoCannotConnectError(KitafinoError):
@@ -55,9 +69,7 @@ class KitafinoCannotConnectError(KitafinoError):
         )
         self.http_status = (
             http_status
-            if isinstance(http_status, int)
-            and not isinstance(http_status, bool)
-            and 100 <= http_status <= 599
+            if type(http_status) is int and 100 <= http_status <= 599
             else None
         )
 
@@ -78,6 +90,25 @@ ERROR_LOGIN_FAILED = "login_failed"
 ERROR_NETWORK = "network_error"
 ERROR_PARSE = "parse_error"
 ERROR_UNKNOWN = "unknown_error"
+
+
+def _safe_auth_diagnostics(
+    stage: object,
+    reason: object,
+    http_status: object,
+) -> tuple[RequestStage | None, FailureReason | None, int | None]:
+    """Return a coherent authentication diagnostic tuple or no evidence."""
+    if type(stage) is not str or stage not in ("login", "meal_plan"):
+        return None, None, None
+    if type(reason) is not str:
+        return None, None, None
+    if type(http_status) is not int:
+        return None, None, None
+    if reason == "http_status" and http_status in (401, 403):
+        return stage, "http_status", http_status
+    if reason == "login_page" and http_status == 200:
+        return stage, "login_page", 200
+    return None, None, None
 
 
 def error_code(error: BaseException) -> str:

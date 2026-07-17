@@ -120,7 +120,11 @@ class KitafinoClient:
     def _raise_for_login_result(self, result: KitafinoTransportResult) -> None:
         """Map login response metadata to typed errors."""
         if result.login_status in (401, 403):
-            raise KitafinoInvalidAuthError()
+            raise KitafinoInvalidAuthError(
+                stage="login",
+                reason="http_status",
+                http_status=result.login_status,
+            )
 
         if result.login_status != 200:
             raise KitafinoCannotConnectError(
@@ -130,7 +134,11 @@ class KitafinoClient:
             )
 
         if self._looks_like_login_page(result.login_url, result.login_text):
-            raise KitafinoInvalidAuthError()
+            raise KitafinoInvalidAuthError(
+                stage="login",
+                reason="login_page",
+                http_status=result.login_status,
+            )
 
     def _raise_for_source_result(self, result: KitafinoTransportResult) -> None:
         """Map authenticated source response metadata to typed errors."""
@@ -143,7 +151,11 @@ class KitafinoClient:
             )
 
         if result.source_status in (401, 403):
-            raise KitafinoInvalidAuthError()
+            raise KitafinoInvalidAuthError(
+                stage="meal_plan",
+                reason="http_status",
+                http_status=result.source_status,
+            )
 
         if result.source_status != 200:
             raise KitafinoCannotConnectError(
@@ -158,7 +170,11 @@ class KitafinoClient:
             )
 
         if self._looks_like_login_page(result.source_url, result.source_text or ""):
-            raise KitafinoInvalidAuthError()
+            raise KitafinoInvalidAuthError(
+                stage="meal_plan",
+                reason="login_page",
+                http_status=result.source_status,
+            )
 
     @staticmethod
     def _looks_like_login_page(url: str, text: str) -> bool:
