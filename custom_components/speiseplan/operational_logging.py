@@ -13,6 +13,8 @@ from .kitafino.errors import (
     ERROR_NETWORK,
     ERROR_PARSE,
     ERROR_UNKNOWN,
+    SAFE_FAILURE_REASONS,
+    SAFE_REQUEST_STAGES,
 )
 
 _LOGGER = logging.getLogger(__package__ or DOMAIN)
@@ -43,7 +45,7 @@ class RedactedOperationalLogger:
         self.logger = logger or _LOGGER
         self.clock = clock
         self.dedup_interval_seconds = dedup_interval_seconds
-        self._last_logged_by_key: dict[tuple[str, str, str], float] = {}
+        self._last_logged_by_key: dict[tuple[str, str, str, str, str, int | None], float] = {}
 
     def log_failure(
         self,
@@ -51,6 +53,9 @@ class RedactedOperationalLogger:
         entry_id: str | None,
         phase: str,
         failure_class: str,
+        request_stage: object = None,
+        failure_reason: object = None,
+        http_status: object = None,
     ) -> bool:
         """Log a redacted failure event and return whether it was emitted."""
         safe_entry_id = _safe_entry_id(entry_id)
@@ -60,7 +65,33 @@ class RedactedOperationalLogger:
             if failure_class in SAFE_FAILURE_CLASSES
             else ERROR_UNKNOWN
         )
-        key = (safe_entry_id, safe_phase, safe_failure_class)
+        safe_request_stage = (
+            request_stage
+            if isinstance(request_stage, str)
+            and request_stage in SAFE_REQUEST_STAGES
+            else "unknown"
+        )
+        safe_failure_reason = (
+            failure_reason
+            if isinstance(failure_reason, str)
+            and failure_reason in SAFE_FAILURE_REASONS
+            else "unknown"
+        )
+        safe_http_status = (
+            http_status
+            if isinstance(http_status, int)
+            and not isinstance(http_status, bool)
+            and 100 <= http_status <= 599
+            else None
+        )
+        key = (
+            safe_entry_id,
+            safe_phase,
+            safe_failure_class,
+            safe_request_stage,
+            safe_failure_reason,
+            safe_http_status,
+        )
         now = self.clock()
         last_logged = self._last_logged_by_key.get(key)
         if (
@@ -71,10 +102,14 @@ class RedactedOperationalLogger:
 
         self._last_logged_by_key[key] = now
         self.logger.warning(
-            "Speiseplan operation failed: entry_id=%s phase=%s failure_class=%s",
+            "Speiseplan operation failed: entry_id=%s phase=%s failure_class=%s "
+            "request_stage=%s failure_reason=%s http_status=%s",
             safe_entry_id,
             safe_phase,
             safe_failure_class,
+            safe_request_stage,
+            safe_failure_reason,
+            safe_http_status if safe_http_status is not None else "none",
         )
         return True
 

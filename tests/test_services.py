@@ -313,6 +313,8 @@ def test_manual_refresh_logs_unexpected_coordinator_exception_safely(
         async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
             raise KitafinoCannotConnectError(
                 "RAW_KITAFINO_HTML_CAPTURE parent@example.test super-secret",
+                stage="login",
+                reason="timeout",
             )
 
     logger = logging.getLogger("speiseplan.test.services.logging")
@@ -337,6 +339,9 @@ def test_manual_refresh_logs_unexpected_coordinator_exception_safely(
     assert "entry_id=entry-1" in text
     assert "phase=manual_refresh" in text
     assert "failure_class=network_error" in text
+    assert "request_stage=login" in text
+    assert "failure_reason=timeout" in text
+    assert "http_status=none" in text
     assert "RAW_KITAFINO_HTML_CAPTURE" not in text
     assert "parent@example.test" not in text
     assert "super-secret" not in text

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
-from .kitafino.errors import error_code
+from .kitafino.errors import KitafinoCannotConnectError, error_code
 from .models import Child, HealthStatus, MealEntry, MealPlanSnapshot
 from .operational_logging import (
     DEFAULT_OPERATIONAL_LOGGER,
@@ -62,10 +62,20 @@ class SpeiseplanDataUpdateCoordinator:
             entries = self.parse_source(source, fetched_at=fetched_at)
         except Exception as err:
             failure_code = error_code(err)
+            diagnostics = (
+                {
+                    "request_stage": err.stage,
+                    "failure_reason": err.reason,
+                    "http_status": err.http_status,
+                }
+                if isinstance(err, KitafinoCannotConnectError)
+                else {}
+            )
             self.operational_logger.log_failure(
                 entry_id=self.config_entry_id,
                 phase=phase,
                 failure_class=failure_code,
+                **diagnostics,
             )
             snapshot = await self._snapshot_for_failure(err, fetched_at=fetched_at)
             self.snapshot = snapshot

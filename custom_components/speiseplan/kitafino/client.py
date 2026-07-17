@@ -83,7 +83,9 @@ class KitafinoClient:
         self._raise_for_login_result(result)
         self._raise_for_source_result(result)
         if result.source_text is None:
-            raise KitafinoCannotConnectError()
+            raise KitafinoCannotConnectError(
+                stage="meal_plan", reason="missing_content"
+            )
         return result.source_text
 
     def _validate_configured_credentials(self) -> None:
@@ -101,18 +103,19 @@ class KitafinoClient:
             fetch_source=fetch_source,
         )
 
-        transport_failed = False
+        failure_reason = "transport"
         try:
             if self._transport is not None:
                 return await self._transport(request)
             return await self._async_aiohttp_transport(request)
-        except (TimeoutError, asyncio.TimeoutError, OSError):
-            transport_failed = True
+        except (TimeoutError, asyncio.TimeoutError):
+            failure_reason = "timeout"
+        except OSError:
+            pass
 
-        if transport_failed:
-            raise KitafinoCannotConnectError()
-
-        raise KitafinoCannotConnectError()
+        raise KitafinoCannotConnectError(
+            stage="transport", reason=failure_reason
+        )
 
     def _raise_for_login_result(self, result: KitafinoTransportResult) -> None:
         """Map login response metadata to typed errors."""
@@ -120,7 +123,11 @@ class KitafinoClient:
             raise KitafinoInvalidAuthError()
 
         if result.login_status != 200:
-            raise KitafinoCannotConnectError()
+            raise KitafinoCannotConnectError(
+                stage="login",
+                reason="http_status",
+                http_status=result.login_status,
+            )
 
         if self._looks_like_login_page(result.login_url, result.login_text):
             raise KitafinoInvalidAuthError()
@@ -130,15 +137,25 @@ class KitafinoClient:
         if (
             result.source_status is None
             or result.source_url is None
-            or result.source_text is None
         ):
-            raise KitafinoCannotConnectError()
+            raise KitafinoCannotConnectError(
+                stage="meal_plan", reason="incomplete_response"
+            )
 
         if result.source_status in (401, 403):
             raise KitafinoInvalidAuthError()
 
         if result.source_status != 200:
-            raise KitafinoCannotConnectError()
+            raise KitafinoCannotConnectError(
+                stage="meal_plan",
+                reason="http_status",
+                http_status=result.source_status,
+            )
+
+        if result.source_text is None:
+            raise KitafinoCannotConnectError(
+                stage="meal_plan", reason="missing_content"
+            )
 
         if self._looks_like_login_page(result.source_url, result.source_text or ""):
             raise KitafinoInvalidAuthError()
@@ -177,7 +194,8 @@ class KitafinoClient:
             "login": "Anmelden",
         }
 
-        transport_failed = False
+        request_stage = "login"
+        failure_reason = "transport"
         try:
             async with aiohttp.ClientSession(
                 timeout=timeout,
@@ -195,21 +213,25 @@ class KitafinoClient:
                         login_text=login_text,
                     )
 
+                request_stage = "meal_plan"
                 async with session.get(request.meal_plan_url) as response:
                     source_status = response.status
                     source_url = str(response.url)
                     source_text = await response.text(errors="replace")
-        except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError, OSError):
-            transport_failed = True
 
-        if transport_failed:
-            raise KitafinoCannotConnectError()
+                return KitafinoTransportResult(
+                    login_status=login_status,
+                    login_url=login_url,
+                    login_text=login_text,
+                    source_status=source_status,
+                    source_url=source_url,
+                    source_text=source_text,
+                )
+        except (TimeoutError, asyncio.TimeoutError):
+            failure_reason = "timeout"
+        except (aiohttp.ClientError, OSError):
+            pass
 
-        return KitafinoTransportResult(
-            login_status=login_status,
-            login_url=login_url,
-            login_text=login_text,
-            source_status=source_status,
-            source_url=source_url,
-            source_text=source_text,
+        raise KitafinoCannotConnectError(
+            stage=request_stage, reason=failure_reason
         )

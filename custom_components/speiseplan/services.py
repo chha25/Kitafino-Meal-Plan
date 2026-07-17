@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .const import DOMAIN
-from .kitafino.errors import error_code
+from .kitafino.errors import KitafinoCannotConnectError, error_code
 from .models import MealPlanSnapshot
 from .mqtt import async_schedule_publish_if_enabled, build_snapshot_payload
 from .operational_logging import DEFAULT_OPERATIONAL_LOGGER
@@ -122,10 +122,20 @@ async def async_handle_manual_refresh(
             snapshot = await coordinator.async_refresh(phase="manual_refresh")
         except Exception as err:
             failure_code = error_code(err)
+            diagnostics = (
+                {
+                    "request_stage": err.stage,
+                    "failure_reason": err.reason,
+                    "http_status": err.http_status,
+                }
+                if isinstance(err, KitafinoCannotConnectError)
+                else {}
+            )
             DEFAULT_OPERATIONAL_LOGGER.log_failure(
                 entry_id=coordinator_entry_id,
                 phase="manual_refresh",
                 failure_class=failure_code,
+                **diagnostics,
             )
             errors.append(
                 {

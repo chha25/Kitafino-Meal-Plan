@@ -160,8 +160,12 @@ def test_fetch_treats_missing_source_text_as_cannot_connect() -> None:
         transport=FakeTransport(_result(source_text=None)),
     )
 
-    with pytest.raises(KitafinoCannotConnectError):
+    with pytest.raises(KitafinoCannotConnectError) as err:
         asyncio.run(client.async_fetch_meal_plan_source())
+
+    assert err.value.stage == "meal_plan"
+    assert err.value.reason == "missing_content"
+    assert err.value.http_status is None
 
 
 def test_fetch_does_not_treat_do_login_final_url_as_auth_failure() -> None:
@@ -204,6 +208,40 @@ def test_fetch_maps_transport_exceptions_without_leaking_details(
     assert str(err.value) == ""
     assert err.value.__cause__ is None
     assert err.value.__context__ is None
+    assert err.value.stage == "transport"
+    assert err.value.reason == (
+        "timeout" if isinstance(exception, TimeoutError) else "transport"
+    )
+
+
+def test_fetch_classifies_meal_plan_http_status() -> None:
+    client = KitafinoClient(
+        USERNAME,
+        PASSWORD,
+        transport=FakeTransport(_result(source_status=503)),
+    )
+
+    with pytest.raises(KitafinoCannotConnectError) as err:
+        asyncio.run(client.async_fetch_meal_plan_source())
+
+    assert err.value.stage == "meal_plan"
+    assert err.value.reason == "http_status"
+    assert err.value.http_status == 503
+
+
+def test_fetch_prioritizes_http_status_over_missing_error_body() -> None:
+    client = KitafinoClient(
+        USERNAME,
+        PASSWORD,
+        transport=FakeTransport(_result(source_status=503, source_text=None)),
+    )
+
+    with pytest.raises(KitafinoCannotConnectError) as err:
+        asyncio.run(client.async_fetch_meal_plan_source())
+
+    assert err.value.stage == "meal_plan"
+    assert err.value.reason == "http_status"
+    assert err.value.http_status == 503
 
 
 def test_fetch_rejects_blank_credentials_before_transport_call() -> None:
