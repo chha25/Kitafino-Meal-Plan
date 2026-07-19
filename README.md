@@ -4,18 +4,18 @@ Kitafino Meal Plan is a Home Assistant custom integration for showing Kitafino m
 
 ## Status
 
-This repository is in early implementation. The MVP target is:
+Version `1.0.0` is prepared as the first stable HACS release. It provides:
 
 - HACS custom repository installation
 - Home Assistant minimum version `2026.6.4`
 - Initial Home Assistant UI credential setup
-- Child, schedule, reauth, and MQTT option surfaces in later stories
+- Child labels, update schedule, reauthentication, reconfiguration, and MQTT options
 - Shared-source Current Week meal sensors first
 - Child-specific sensors deferred until reliable Kitafino evidence exists
 - Next Week support deferred until reliable Kitafino evidence exists
 - Secure handling of credentials, cookies, diagnostics, fixtures, and examples
 
-The integration scaffold, configuration flow, Kitafino retrieval/parsing core, stale snapshot handling, manual refresh service, and shared Current Week sensor projection are in place. Runtime wiring will continue to mature through the remaining stories.
+The integration includes Home Assistant runtime wiring, authenticated Kitafino retrieval, parsing for the currently observed Kitafino meal-page structure, stale snapshot handling, manual refresh, shared Current Week sensors, redacted diagnostics, and optional MQTT publishing.
 
 ## Shared Source and Child Labels
 
@@ -74,12 +74,12 @@ Snapshot payload shape:
     "last_successful_update": "2026-07-14T06:00:00+02:00",
     "fetched_at": "2026-07-14T06:00:00+02:00",
     "shared_source": true,
-    "parser_version": "kitafino-html-v1"
+    "parser_version": "kitafino-html-v2"
   },
   "fetched_at": "2026-07-14T06:00:00+02:00",
   "last_successful_update": "2026-07-14T06:00:00+02:00",
   "shared_source": true,
-  "parser_version": "kitafino-html-v1",
+  "parser_version": "kitafino-html-v2",
   "configured_child_count": 1,
   "entries": []
 }
@@ -94,7 +94,7 @@ Health payload shape:
   "last_successful_update": "2026-07-14T06:00:00+02:00",
   "fetched_at": "2026-07-14T06:00:00+02:00",
   "shared_source": true,
-  "parser_version": "kitafino-html-v1"
+  "parser_version": "kitafino-html-v2"
 }
 ```
 
@@ -148,7 +148,7 @@ Run tests with:
 python -m pytest
 ```
 
-The current scaffold keeps runtime code import-safe and avoids network access during import.
+The integration keeps runtime modules import-safe and avoids network access during import.
 
 GitHub Actions runs the same test command on pushes to `main` and pull requests.
 

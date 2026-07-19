@@ -56,6 +56,20 @@ def test_hacs_declares_minimum_home_assistant_version() -> None:
     assert hacs["homeassistant"] == "2026.6.4"
 
 
+def test_release_metadata_is_consistent() -> None:
+    manifest = json.loads(
+        (ROOT / "custom_components/speiseplan/manifest.json").read_text()
+    )
+    version = manifest["version"]
+    readme = (ROOT / "README.md").read_text()
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+
+    assert version == "1.0.0"
+    assert f"Version `{version}` is prepared" in readme
+    assert f"## [{version}] - 2026-07-19" in changelog
+    assert f"/releases/tag/v{version}" in changelog
+
+
 def test_user_schema_exposes_username_and_password() -> None:
     assert get_user_schema_keys() == (CONF_USERNAME, CONF_PASSWORD)
 

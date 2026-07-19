@@ -23,6 +23,7 @@ from custom_components.speiseplan.services import COORDINATOR_KEY
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_PATHS = [
+    ROOT / "CHANGELOG.md",
     ROOT / "README.md",
     ROOT / "hacs.json",
     ROOT / "custom_components/speiseplan/manifest.json",
@@ -194,7 +195,7 @@ def test_diagnostics_include_redacted_options_and_runtime_snapshot() -> None:
     serialized = str(diagnostics)
 
     assert diagnostics["update_time"] == "06:00"
-    assert diagnostics["version"] == "0.1.0"
+    assert diagnostics["version"] == "1.0.0"
     assert diagnostics["mqtt_enabled"] is True
     assert diagnostics["configured_child_count"] == 1
     assert diagnostics["runtime"] == {

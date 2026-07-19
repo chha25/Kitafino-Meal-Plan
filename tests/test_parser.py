@@ -411,6 +411,9 @@ def test_parser_reports_v2_strategy() -> None:
     assert PARSER_VERSION == "kitafino-html-v2"
     assert KitafinoParser.parser_version == PARSER_VERSION
 
+    readme = (ROOT / "README.md").read_text()
+    assert readme.count(f'"parser_version": "{PARSER_VERSION}"') == 3
+
 
 def test_production_fixture_and_results_are_secret_safe() -> None:
     source = (ROOT / "tests/fixtures/kitafino_production_current_week.html").read_text()
