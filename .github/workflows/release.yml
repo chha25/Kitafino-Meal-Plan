@@ -76,6 +76,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
         run: >-
           gh release create "v${RELEASE_VERSION}"
+          --repo "$GITHUB_REPOSITORY"
           --target "${{ github.sha }}"
           --title "v${RELEASE_VERSION}"
           --generate-notes
