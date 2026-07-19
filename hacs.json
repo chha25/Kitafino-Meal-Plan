@@ -1,5 +1,8 @@
 {
   "name": "Kitafino Meal Plan",
   "homeassistant": "2026.6.4",
-  "render_readme": true
+  "render_readme": true, 
+  "version": "1.0.0",
+  "slug": "kitafino_meal_plan",
+  "description": "A custom component for Home Assistant to fetch meal plans from Kitafino"
 }
