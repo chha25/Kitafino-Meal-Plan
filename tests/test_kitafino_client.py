@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from http.cookies import SimpleCookie
 
+import aiohttp
 import pytest
+from yarl import URL
 
 from custom_components.speiseplan.kitafino.client import (
     MEAL_PLAN_URL,
     KitafinoClient,
     KitafinoTransportRequest,
     KitafinoTransportResult,
+    _reconcile_session_cookie_collision,
 )
 from custom_components.speiseplan.kitafino.errors import (
     KitafinoCannotConnectError,
@@ -22,6 +26,35 @@ from custom_components.speiseplan.kitafino.errors import (
 USERNAME = "parent@example.test"
 PASSWORD = "super-secret"
 SOURCE_HTML = "<html><body>Montag: Pasta</body></html>"
+
+
+def _cookie_jar(
+    *cookies: tuple[str, str, str, str],
+) -> aiohttp.CookieJar:
+    """Build a real in-memory aiohttp cookie jar for one cookie per response."""
+    loop = asyncio.new_event_loop()
+    try:
+        jar = aiohttp.CookieJar(loop=loop)
+    finally:
+        loop.close()
+    for name, value, domain, path in cookies:
+        cookie = SimpleCookie()
+        cookie[name] = value
+        cookie[name]["domain"] = domain
+        cookie[name]["path"] = path
+        jar.update_cookies(
+            cookie,
+            response_url=URL(f"https://{domain.lstrip('.')}{path}"),
+        )
+    return jar
+
+
+def _cookie_state(jar: aiohttp.CookieJar) -> set[tuple[str, str, str, str]]:
+    """Return cookie state for exact preservation assertions."""
+    return {
+        (morsel.key, morsel.value, morsel["domain"], morsel["path"])
+        for morsel in jar
+    }
 
 
 class FakeTransport:
@@ -65,6 +98,73 @@ def _result(
         source_url=source_url,
         source_text=source_text,
     )
+
+
+def test_reconcile_session_cookie_collision_selects_parent_session() -> None:
+    jar = _cookie_jar(
+        ("PHPSESSID", "parent-session", ".kitafino.de", "/"),
+        ("PHPSESSID", "user-session", "user.kitafino.de", "/"),
+    )
+
+    _reconcile_session_cookie_collision(jar, MEAL_PLAN_URL)
+
+    assert _cookie_state(jar) == {
+        ("PHPSESSID", "parent-session", "kitafino.de", "/"),
+    }
+    eligible = jar.filter_cookies(URL(MEAL_PLAN_URL))
+    assert eligible["PHPSESSID"].value == "parent-session"
+
+
+@pytest.mark.parametrize(
+    "cookies",
+    [
+        (("PHPSESSID", "parent-session", ".kitafino.de", "/"),),
+        (("PHPSESSID", "user-session", "user.kitafino.de", "/"),),
+        (("PHPSESSID", "auth-session", "auth.kitafino.de", "/"),),
+    ],
+)
+def test_reconcile_session_cookie_collision_preserves_single_scope(
+    cookies: tuple[tuple[str, str, str, str], ...],
+) -> None:
+    jar = _cookie_jar(*cookies)
+    before = _cookie_state(jar)
+
+    _reconcile_session_cookie_collision(jar, MEAL_PLAN_URL)
+
+    assert _cookie_state(jar) == before
+
+
+def test_reconcile_session_cookie_collision_preserves_unrelated_cookies() -> None:
+    jar = _cookie_jar(
+        ("PHPSESSID", "parent-session", ".kitafino.de", "/"),
+        ("PHPSESSID", "user-session", "user.kitafino.de", "/"),
+        ("PHPSESSID", "auth-session", "auth.kitafino.de", "/auth"),
+        ("rememberme", "remember-token", "user.kitafino.de", "/"),
+        ("preference", "compact", ".kitafino.de", "/settings"),
+        ("PHPSESSID", "orders-session", "user.kitafino.de", "/orders"),
+    )
+
+    _reconcile_session_cookie_collision(jar, MEAL_PLAN_URL)
+
+    assert _cookie_state(jar) == {
+        ("PHPSESSID", "parent-session", "kitafino.de", "/"),
+        ("PHPSESSID", "auth-session", "auth.kitafino.de", "/auth"),
+        ("rememberme", "remember-token", "user.kitafino.de", "/"),
+        ("preference", "compact", "kitafino.de", "/settings"),
+        ("PHPSESSID", "orders-session", "user.kitafino.de", "/orders"),
+    }
+
+
+def test_reconcile_requires_parent_session_eligible_for_meal_path() -> None:
+    jar = _cookie_jar(
+        ("PHPSESSID", "parent-session", ".kitafino.de", "/account"),
+        ("PHPSESSID", "user-session", "user.kitafino.de", "/"),
+    )
+    before = _cookie_state(jar)
+
+    _reconcile_session_cookie_collision(jar, MEAL_PLAN_URL)
+
+    assert _cookie_state(jar) == before
 
 
 def test_fetch_meal_plan_source_logs_in_and_returns_source_text() -> None:

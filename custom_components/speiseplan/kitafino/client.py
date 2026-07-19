@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
+from http.cookies import Morsel
+from typing import Protocol
+from urllib.parse import urlsplit
 
 from .errors import (
     KitafinoCannotConnectError,
@@ -19,6 +22,65 @@ LOGIN_URL = "https://auth.kitafino.de/sys_k2/index.php?action=do_login"
 MEAL_PLAN_URL = "https://user.kitafino.de/sys_k2/index.php?action=bestellen"
 USER_AGENT = "Mozilla/5.0 (Home Assistant Kitafino Meal Plan)"
 TIMEOUT_SECONDS = 15
+_PHP_SESSION_COOKIE = "PHPSESSID"
+_PARENT_COOKIE_DOMAIN = "kitafino.de"
+_USER_COOKIE_DOMAIN = "user.kitafino.de"
+
+
+class _CookieJar(Protocol):
+    """Public cookie-jar operations used by session reconciliation."""
+
+    def __iter__(self) -> Iterator[Morsel[str]]: ...
+
+    def clear(
+        self,
+        predicate: Callable[[Morsel[str]], bool] | None = None,
+    ) -> None: ...
+
+
+def _cookie_path_matches(request_path: str, cookie_path: str) -> bool:
+    """Return whether a cookie path applies to a request path."""
+    normalized_path = cookie_path or "/"
+    return (
+        request_path == normalized_path
+        or (
+            request_path.startswith(normalized_path)
+            and (
+                normalized_path.endswith("/")
+                or request_path[len(normalized_path) :].startswith("/")
+            )
+        )
+    )
+
+
+def _reconcile_session_cookie_collision(
+    cookie_jar: _CookieJar,
+    request_url: str,
+) -> None:
+    """Prefer the parent session only for an eligible duplicate state."""
+    request_path = urlsplit(request_url).path or "/"
+    eligible_sessions = [
+        morsel
+        for morsel in cookie_jar
+        if morsel.key == _PHP_SESSION_COOKIE
+        and _cookie_path_matches(request_path, morsel["path"])
+    ]
+    session_domains = {
+        morsel["domain"].lstrip(".").lower() for morsel in eligible_sessions
+    }
+    if not {
+        _PARENT_COOKIE_DOMAIN,
+        _USER_COOKIE_DOMAIN,
+    }.issubset(session_domains):
+        return
+
+    cookie_jar.clear(
+        lambda morsel: (
+            morsel.key == _PHP_SESSION_COOKIE
+            and morsel["domain"].lstrip(".").lower() == _USER_COOKIE_DOMAIN
+            and _cookie_path_matches(request_path, morsel["path"])
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -229,6 +291,10 @@ class KitafinoClient:
                         login_text=login_text,
                     )
 
+                _reconcile_session_cookie_collision(
+                    session.cookie_jar,
+                    request.meal_plan_url,
+                )
                 request_stage = "meal_plan"
                 async with session.get(request.meal_plan_url) as response:
                     source_status = response.status
