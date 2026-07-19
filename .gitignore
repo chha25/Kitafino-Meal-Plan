@@ -17,3 +17,4 @@ Thumbs.db
 .agents/
 _bmad/
 _bmad-output/
+.private/
