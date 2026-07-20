@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-20
+
+### Added
+
+- One independently authenticated Home Assistant config entry per child.
+- Immutable child slugs with collision-free health and weekday meal entities.
+- Local Home Assistant brand icon with transparent background.
+
+### Changed
+
+- Fresh, cached, and stale meal data is isolated by the owning child slug.
+- Legacy entries remain available in shared-source mode until manually replaced.
+- Reauthentication preserves child slugs and entity identities.
+
+### Fixed
+
+- Shared, foreign, mixed, or unattributed cached meals cannot be relabeled for another child.
+- Unavailable child sensors retain child-owned, non-shared attribution.
+
 ## [1.0.0] - 2026-07-19
 
 ### Added
@@ -21,12 +40,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Parsing for the currently observed Kitafino structure, returning one selected meal per weekday.
 - Parser strategy `kitafino-html-v2` with legacy fixture compatibility.
 - Authentication through the dedicated Kitafino authentication and user endpoints.
+- Manually triggered GitHub Actions workflow for tested GitHub releases.
 
 ### Fixed
 
 - Corrected the Kitafino meal-plan endpoint.
 - Reconciled conflicting parent-domain and user-host `PHPSESSID` cookies.
 - Distinguished network, authentication, and parser failures without exposing response content.
+- Release creation supplies the repository explicitly when no Git checkout is present.
 
 ### Security
 
@@ -35,5 +56,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Diagnostics, MQTT payloads, fixtures, and repository examples exclude raw HTML, account identifiers, and sensitive HTTP data.
 - Local investigation material under `.private/` is excluded from version control.
 
-[Unreleased]: https://github.com/chha25/Kitafino-Meal-Plan/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/chha25/Kitafino-Meal-Plan/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/chha25/Kitafino-Meal-Plan/releases/tag/v1.1.0
 [1.0.0]: https://github.com/chha25/Kitafino-Meal-Plan/releases/tag/v1.0.0

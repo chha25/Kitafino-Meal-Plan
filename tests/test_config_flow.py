@@ -67,14 +67,25 @@ def test_release_metadata_is_consistent() -> None:
     manifest = json.loads(
         (ROOT / "custom_components/speiseplan/manifest.json").read_text()
     )
+    hacs = json.loads((ROOT / "hacs.json").read_text())
     version = manifest["version"]
     readme = (ROOT / "README.md").read_text()
     changelog = (ROOT / "CHANGELOG.md").read_text()
 
-    assert version == "1.0.0"
+    assert version == "1.1.0"
+    assert hacs["version"] == version
     assert f"Version `{version}` is prepared" in readme
-    assert f"## [{version}] - 2026-07-19" in changelog
-    assert f"/releases/tag/v{version}" in changelog
+    assert changelog.index(f"## [{version}] - 2026-07-20") > changelog.index(
+        "## [Unreleased]"
+    )
+    assert (
+        f"[{version}]: https://github.com/chha25/Kitafino-Meal-Plan/"
+        f"releases/tag/v{version}"
+    ) in changelog
+    assert (
+        f"[Unreleased]: https://github.com/chha25/Kitafino-Meal-Plan/"
+        f"compare/v{version}...HEAD"
+    ) in changelog
 
 
 def test_user_schema_exposes_immutable_slug_and_credentials() -> None:

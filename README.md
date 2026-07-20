@@ -4,7 +4,7 @@ Kitafino Meal Plan is a Home Assistant custom integration for showing Kitafino m
 
 ## Status
 
-Version `1.0.0` is prepared as the first stable HACS release. It provides:
+Version `1.1.0` is prepared as the next stable HACS release. It provides:
 
 - HACS custom repository installation
 - Home Assistant minimum version `2026.6.4`
@@ -15,7 +15,7 @@ Version `1.0.0` is prepared as the first stable HACS release. It provides:
 - Next Week support deferred until reliable Kitafino evidence exists
 - Secure handling of credentials, cookies, diagnostics, fixtures, and examples
 
-The integration includes Home Assistant runtime wiring, authenticated Kitafino retrieval, parsing for the currently observed Kitafino meal-page structure, stale snapshot handling, manual refresh, shared Current Week sensors, redacted diagnostics, and optional MQTT publishing.
+The integration includes Home Assistant runtime wiring, authenticated Kitafino retrieval, parsing for the currently observed Kitafino meal-page structure, stale snapshot handling, manual refresh, child-owned Current Week sensors with legacy shared compatibility, redacted diagnostics, and optional MQTT publishing.
 
 ## Multiple Children and Legacy Entries
 
@@ -65,7 +65,7 @@ Published topics use the stable prefix `speiseplan/{entry_id}`:
 - `speiseplan/{entry_id}/health`
 - `speiseplan/{entry_id}/meal/{source}/{week}/{day}`
 
-For the MVP shared-source meal plan, `{source}` is `shared`, `{week}` is `current`, and `{day}` is one of `monday`, `tuesday`, `wednesday`, `thursday`, or `friday`. Topic segments are sanitized before publication.
+For new entries, `{source}` is the configured child slug. Legacy shared entries continue using `shared`. `{week}` is `current`, and `{day}` is one of `monday`, `tuesday`, `wednesday`, `thursday`, or `friday`. Topic segments are sanitized before publication.
 
 MQTT messages are published with QoS `0` and retained messages disabled.
 
@@ -78,12 +78,12 @@ Snapshot payload shape:
     "last_error": null,
     "last_successful_update": "2026-07-14T06:00:00+02:00",
     "fetched_at": "2026-07-14T06:00:00+02:00",
-    "shared_source": true,
+    "shared_source": false,
     "parser_version": "kitafino-html-v2"
   },
   "fetched_at": "2026-07-14T06:00:00+02:00",
   "last_successful_update": "2026-07-14T06:00:00+02:00",
-  "shared_source": true,
+  "shared_source": false,
   "parser_version": "kitafino-html-v2",
   "configured_child_count": 1,
   "entries": []
@@ -98,7 +98,7 @@ Health payload shape:
   "last_error": null,
   "last_successful_update": "2026-07-14T06:00:00+02:00",
   "fetched_at": "2026-07-14T06:00:00+02:00",
-  "shared_source": true,
+  "shared_source": false,
   "parser_version": "kitafino-html-v2"
 }
 ```
@@ -107,14 +107,14 @@ Meal payload shape:
 
 ```json
 {
-  "source": "shared",
+  "source": "lena",
   "week": "current",
   "day": "monday",
   "meal_text": "Pasta",
   "source_date": "2026-07-14",
   "fetched_at": "2026-07-14T06:00:00+02:00",
   "stale": false,
-  "shared_source": true,
+  "shared_source": false,
   "iso_year": 2026,
   "iso_week": 29
 }

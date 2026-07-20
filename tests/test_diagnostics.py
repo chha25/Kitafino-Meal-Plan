@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import asyncio
+import json
 from types import SimpleNamespace
 
 from custom_components.speiseplan.const import (
@@ -231,7 +232,10 @@ def test_diagnostics_include_redacted_options_and_runtime_snapshot() -> None:
     serialized = str(diagnostics)
 
     assert diagnostics["update_time"] == "06:00"
-    assert diagnostics["version"] == "1.0.0"
+    manifest = json.loads(
+        (ROOT / "custom_components/speiseplan/manifest.json").read_text()
+    )
+    assert diagnostics["version"] == manifest["version"]
     assert diagnostics["mqtt_enabled"] is True
     assert diagnostics["configured_child_count"] == 1
     assert diagnostics["runtime"] == {
