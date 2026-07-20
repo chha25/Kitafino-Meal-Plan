@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from custom_components.speiseplan.const import (
+    CONF_CHILD_SLUG,
     CONF_PASSWORD,
     CONF_USERNAME,
     DEFAULT_TITLE,
@@ -23,11 +25,16 @@ from custom_components.speiseplan.config_flow import (
     async_validate_user_input,
     async_validate_credential_update,
     build_credential_update_schema,
+    build_child_options_schema,
     build_default_options,
     normalize_options_input,
     options_with_defaults,
     get_duplicate_setup_abort_reason,
     get_user_schema_keys,
+    child_unique_id,
+    config_entry_unique_id,
+    configured_child_slugs,
+    normalize_child_options_input,
     parse_children_text,
 )
 from custom_components.speiseplan.kitafino.client import KitafinoClient
@@ -70,8 +77,8 @@ def test_release_metadata_is_consistent() -> None:
     assert f"/releases/tag/v{version}" in changelog
 
 
-def test_user_schema_exposes_username_and_password() -> None:
-    assert get_user_schema_keys() == (CONF_USERNAME, CONF_PASSWORD)
+def test_user_schema_exposes_immutable_slug_and_credentials() -> None:
+    assert get_user_schema_keys() == (CONF_CHILD_SLUG, CONF_USERNAME, CONF_PASSWORD)
 
 
 def test_config_flow_uses_product_title_for_entry() -> None:
@@ -115,6 +122,118 @@ def test_username_is_trimmed_before_storage() -> None:
     )
 
     assert result.data[CONF_USERNAME] == "parent@example.test"
+
+
+@pytest.mark.parametrize("slug", ["", "shared", "Lena", "bad-slug", "a" * 33])
+def test_new_entry_rejects_invalid_or_reserved_slug_before_auth(slug: str) -> None:
+    auth_called = False
+
+    async def validator(username: str, password: str) -> None:
+        nonlocal auth_called
+        auth_called = True
+
+    result = asyncio.run(
+        async_validate_user_input(
+            {
+                CONF_CHILD_SLUG: slug,
+                CONF_USERNAME: "parent@example.test",
+                CONF_PASSWORD: "secret",
+            },
+            validator=validator,
+            require_child_slug=True,
+        )
+    )
+
+    assert result.errors == {CONF_CHILD_SLUG: "invalid_child_slug"}
+    assert auth_called is False
+
+
+def test_duplicate_normalized_slug_is_rejected_before_remote_auth() -> None:
+    auth_called = False
+
+    async def validator(username: str, password: str) -> None:
+        nonlocal auth_called
+        auth_called = True
+
+    result = asyncio.run(
+        async_validate_user_input(
+            {
+                CONF_CHILD_SLUG: " lena ",
+                CONF_USERNAME: "same@example.test",
+                CONF_PASSWORD: "same-secret",
+            },
+            validator=validator,
+            require_child_slug=True,
+            existing_child_slugs={"lena"},
+        )
+    )
+
+    assert result.errors == {CONF_CHILD_SLUG: "duplicate_child_slug"}
+    assert auth_called is False
+
+
+def test_distinct_slugs_accept_identical_credentials_and_have_distinct_ids() -> None:
+    async def validator(username: str, password: str) -> None:
+        return None
+
+    results = [
+        asyncio.run(
+            async_validate_user_input(
+                {
+                    CONF_CHILD_SLUG: slug,
+                    CONF_USERNAME: "same@example.test",
+                    CONF_PASSWORD: "same-secret",
+                },
+                validator=validator,
+                require_child_slug=True,
+                existing_child_slugs={"lena"} if slug == "max" else set(),
+            )
+        )
+        for slug in ("lena", "max")
+    ]
+
+    assert [result.errors for result in results] == [{}, {}]
+    assert child_unique_id("lena") != child_unique_id("max")
+    entries = [SimpleNamespace(data=result.data) for result in results]
+    assert configured_child_slugs(entries) == {"lena", "max"}
+
+
+def test_missing_unique_id_fallback_uses_validated_slug_or_legacy_domain() -> None:
+    child_entry = SimpleNamespace(
+        unique_id=None,
+        data={CONF_CHILD_SLUG: "lena"},
+    )
+    legacy_entry = SimpleNamespace(unique_id=None, data={})
+
+    assert config_entry_unique_id(child_entry) == "speiseplan:lena"
+    assert config_entry_unique_id(legacy_entry) == "speiseplan"
+
+
+def test_existing_unique_id_wins_over_derived_fallback() -> None:
+    entry = SimpleNamespace(
+        unique_id="existing-id",
+        data={CONF_CHILD_SLUG: "lena"},
+    )
+
+    assert config_entry_unique_id(entry) == "existing-id"
+
+
+def test_child_options_exclude_legacy_names_and_shared_source() -> None:
+    schema = build_child_options_schema()
+    result = normalize_child_options_input(
+        {
+            OPTION_UPDATE_TIME: "07:30",
+            OPTION_MQTT_ENABLED: True,
+            OPTION_CHILDREN_TEXT: "Other:other",
+            OPTION_SHARED_SOURCE: True,
+        }
+    )
+
+    assert tuple(schema.keys()) == (OPTION_UPDATE_TIME, OPTION_MQTT_ENABLED)
+    assert result.data == {
+        OPTION_UPDATE_TIME: "07:30",
+        OPTION_MQTT_ENABLED: True,
+    }
 
 
 @pytest.mark.parametrize(
@@ -190,6 +309,7 @@ def test_successful_credential_update_preserves_existing_non_option_data() -> No
             {
                 CONF_USERNAME: "old@example.test",
                 CONF_PASSWORD: "old-secret",
+                CONF_CHILD_SLUG: "lena",
                 "future_setup_key": "preserve-me",
                 OPTION_CHILDREN: [{"name": "Kind", "slug": "kind"}],
                 OPTION_UPDATE_TIME: "06:00",
@@ -208,6 +328,7 @@ def test_successful_credential_update_preserves_existing_non_option_data() -> No
     assert result.entry_data == {
         CONF_USERNAME: "new@example.test",
         CONF_PASSWORD: "new-secret",
+        CONF_CHILD_SLUG: "lena",
         "future_setup_key": "preserve-me",
     }
     assert OPTION_CHILDREN not in result.entry_data
@@ -257,6 +378,13 @@ def test_parse_children_text_normalizes_child_rows() -> None:
         {"name": "Lena", "slug": "lena"},
         {"name": "Max Mustermann", "slug": "max_1"},
     ]
+    assert result.errors == {}
+
+
+def test_legacy_child_row_keeps_historical_shared_slug_saveable() -> None:
+    result = parse_children_text("Household:shared")
+
+    assert result.children == [{"name": "Household", "slug": "shared"}]
     assert result.errors == {}
 
 
@@ -399,6 +527,9 @@ def test_translation_files_include_reauth_and_reconfigure_strings() -> None:
         )
 
         config = translations["config"]
+        assert CONF_CHILD_SLUG in config["step"]["user"]["data"]
+        assert "invalid_child_slug" in config["error"]
+        assert "duplicate_child_slug" in config["error"]
         for step_key in ("reauth_confirm", "reconfigure"):
             step = config["step"][step_key]
             assert step["title"]

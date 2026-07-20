@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .const import DOMAIN, SHARED_CURRENT_ENTITY_ID_TEMPLATE, WEEKDAYS
+from .const import (
+    CHILD_CURRENT_ENTITY_ID_TEMPLATE,
+    DOMAIN,
+    SHARED_CURRENT_ENTITY_ID_TEMPLATE,
+    WEEKDAYS,
+)
 from .models import MealEntry, MealPlanSnapshot
 from .services import COORDINATOR_KEY
 
@@ -19,12 +24,19 @@ HEALTH_ENTITY_ID = "sensor.speiseplan_health"
 class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
     """Integration health and freshness sensor."""
 
-    def __init__(self, *, coordinator: Any) -> None:
+    def __init__(self, *, coordinator: Any, child_slug: str | None = None) -> None:
         """Create a health sensor reading coordinator snapshot state."""
         self.coordinator = coordinator
-        self._attr_entity_id = HEALTH_ENTITY_ID
-        self._attr_unique_id = "speiseplan_health"
-        self._attr_name = "Speiseplan Health"
+        self.child_slug = child_slug
+        self._attr_entity_id = (
+            f"sensor.speiseplan_{child_slug}_health" if child_slug else HEALTH_ENTITY_ID
+        )
+        self._attr_unique_id = (
+            f"speiseplan_{child_slug}_health" if child_slug else "speiseplan_health"
+        )
+        self._attr_name = (
+            f"Speiseplan {child_slug} Health" if child_slug else "Speiseplan Health"
+        )
 
     @property
     def entity_id(self) -> str:
@@ -64,16 +76,19 @@ class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
         """Return safe health and freshness attributes."""
         snapshot = self._snapshot
         if snapshot is None:
-            return {
+            attributes = {
                 "last_successful_update": None,
                 "last_error": None,
                 "configured_child_count": 0,
-                "shared_source": True,
+                "shared_source": self.child_slug is None,
                 "parser_version": None,
                 "fetched_at": None,
             }
+            if self.child_slug is not None:
+                attributes["child_key"] = self.child_slug
+            return attributes
 
-        return {
+        attributes = {
             "last_successful_update": snapshot.last_successful_update,
             "last_error": snapshot.health.last_error,
             "configured_child_count": len(snapshot.children),
@@ -81,6 +96,10 @@ class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
             "parser_version": snapshot.parser_version,
             "fetched_at": snapshot.fetched_at,
         }
+        if self.child_slug is not None:
+            attributes["child_key"] = self.child_slug
+            attributes["shared_source"] = False
+        return attributes
 
     @property
     def _snapshot(self) -> MealPlanSnapshot | None:
@@ -88,7 +107,6 @@ class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
         if isinstance(snapshot, MealPlanSnapshot):
             return snapshot
         return None
-
 
 class SpeiseplanSharedCurrentMealSensor(SensorEntity):  # type: ignore[misc]
     """Shared-source current-week meal sensor."""
@@ -184,6 +202,47 @@ class SpeiseplanSharedCurrentMealSensor(SensorEntity):  # type: ignore[misc]
         return None
 
 
+class SpeiseplanChildCurrentMealSensor(SpeiseplanSharedCurrentMealSensor):
+    """Current-week sensor owned by one child config entry."""
+
+    def __init__(self, *, coordinator: Any, weekday: str, child_slug: str) -> None:
+        super().__init__(coordinator=coordinator, weekday=weekday)
+        self.child_slug = child_slug
+        self._attr_entity_id = CHILD_CURRENT_ENTITY_ID_TEMPLATE.format(
+            slug=child_slug,
+            weekday=weekday,
+        )
+        self._attr_unique_id = f"speiseplan_{child_slug}_current_{weekday}"
+        self._attr_name = f"Speiseplan {child_slug} Current Week {weekday.title()}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Always retain child ownership, including unavailable states."""
+        attributes = super().extra_state_attributes
+        if self._entry is None:
+            return {
+                **attributes,
+                "child_key": self.child_slug,
+                "shared_source": False,
+            }
+        return attributes
+
+    @property
+    def _entry(self) -> MealEntry | None:
+        snapshot = self._snapshot
+        if snapshot is None:
+            return None
+        for entry in snapshot.entries:
+            if (
+                not entry.shared_source
+                and entry.child_key == self.child_slug
+                and entry.week_kind == "current"
+                and entry.weekday == self.weekday
+            ):
+                return entry
+        return None
+
+
 def build_shared_current_meal_sensors(
     coordinator: Any,
 ) -> list[SpeiseplanSharedCurrentMealSensor]:
@@ -199,6 +258,19 @@ def build_shared_current_meal_sensors(
 
 def build_sensors(coordinator: Any) -> list[Any]:
     """Build all Speiseplan sensors for one coordinator."""
+    child_slug = getattr(coordinator, "child_slug", None)
+    if isinstance(child_slug, str) and child_slug:
+        return [
+            SpeiseplanHealthSensor(coordinator=coordinator, child_slug=child_slug),
+            *[
+                SpeiseplanChildCurrentMealSensor(
+                    coordinator=coordinator,
+                    weekday=weekday,
+                    child_slug=child_slug,
+                )
+                for weekday in WEEKDAYS
+            ],
+        ]
     return [
         SpeiseplanHealthSensor(coordinator=coordinator),
         *build_shared_current_meal_sensors(coordinator),

@@ -5,6 +5,7 @@ DEFAULT_TITLE = "Kitafino Meal Plan"
 
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
+CONF_CHILD_SLUG = "child_slug"
 
 OPTION_CHILDREN = "children"
 OPTION_CHILDREN_TEXT = "children_text"
@@ -17,9 +18,11 @@ DEFAULT_MQTT_ENABLED = False
 DEFAULT_SHARED_SOURCE = True
 
 CHILD_SLUG_MAX_LENGTH = 32
+CHILD_SLUG_RESERVED = frozenset({"shared"})
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday")
 SHARED_CURRENT_ENTITY_ID_TEMPLATE = "sensor.speiseplan_shared_current_{weekday}"
+CHILD_CURRENT_ENTITY_ID_TEMPLATE = "sensor.speiseplan_{slug}_current_{weekday}"
 
 FORBIDDEN_SECRET_MARKERS = (
     "REAL_KITAFINO_PASSWORD_VALUE",

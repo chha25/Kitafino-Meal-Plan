@@ -4,8 +4,9 @@
     "step": {
       "user": {
         "title": "Kitafino Meal Plan einrichten",
-        "description": "Gib deine Kitafino-Zugangsdaten ein. Sie werden nur im Home-Assistant-Config-Entry gespeichert.",
+        "description": "Richte ein Kind ein. Fuege die Integration fuer jedes weitere Kind erneut hinzu. Der Slug ist eine dauerhafte oeffentliche Kennung und kann spaeter nicht geaendert werden.",
         "data": {
+          "child_slug": "Kinder-Slug",
           "username": "Kitafino-Benutzername",
           "password": "Kitafino-Passwort"
         }
@@ -30,7 +31,9 @@
     "error": {
       "invalid_auth": "Kitafino hat die eingegebenen Zugangsdaten abgelehnt.",
       "cannot_connect": "Verbindung zu Kitafino nicht moeglich.",
-      "unknown": "Unerwarteter Validierungsfehler."
+      "unknown": "Unerwarteter Validierungsfehler.",
+      "invalid_child_slug": "Verwende 1-32 Kleinbuchstaben, Zahlen oder Unterstriche. Der Slug 'shared' ist reserviert.",
+      "duplicate_child_slug": "Dieser Kinder-Slug ist bereits eingerichtet."
     },
     "abort": {
       "already_configured": "Kitafino Meal Plan ist bereits eingerichtet.",
@@ -43,7 +46,7 @@
     "step": {
       "init": {
         "title": "Kitafino Meal Plan Optionen",
-        "description": "Konfiguriere lokale Home-Assistant-Einstellungen. Kinder werden zeilenweise im Format Anzeigename:slug erfasst.",
+        "description": "Konfiguriere lokale Home-Assistant-Einstellungen. Kinderzeilen und die gemeinsame Quelle bleiben nur fuer Legacy-Eintraege erhalten.",
         "data": {
           "children_text": "Kinder",
           "update_time": "Taegliche Aktualisierungszeit",

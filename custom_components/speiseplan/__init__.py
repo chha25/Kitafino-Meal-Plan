@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from .config_flow import build_default_options
+from .config_flow import build_default_options, normalize_child_slug
 from .const import (
+    CONF_CHILD_SLUG,
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
@@ -90,6 +91,15 @@ def build_runtime_coordinator(
     )
     parser = KitafinoParser()
     shared_source = options[OPTION_SHARED_SOURCE]
+    stored_child_slug = data.get(CONF_CHILD_SLUG)
+    child_slug = normalize_child_slug(stored_child_slug)
+    if CONF_CHILD_SLUG in data and (
+        child_slug is None or stored_child_slug != child_slug
+    ):
+        raise ValueError("Invalid child slug in config entry")
+    is_child_entry = child_slug is not None
+    if is_child_entry:
+        shared_source = False
 
     def clock() -> str:
         return datetime.now().astimezone().isoformat()
@@ -102,6 +112,7 @@ def build_runtime_coordinator(
             fetched_at=fetched_at,
             iso_year=iso_calendar.year,
             iso_week=iso_calendar.week,
+            child_key=child_slug if child_slug is not None else "shared",
             shared_source=shared_source,
         )
 
@@ -110,10 +121,15 @@ def build_runtime_coordinator(
         parse_source=parse_source,
         store=store or SnapshotStore(),
         clock=clock,
-        children=_children_from_options(options[OPTION_CHILDREN]),
+        children=(
+            [Child(child_key=child_slug, display_name=child_slug, source_kind="child")]
+            if child_slug is not None
+            else _children_from_options(options[OPTION_CHILDREN])
+        ),
         parser_version=parser.parser_version,
         shared_source=shared_source,
         config_entry_id=getattr(entry, "entry_id", None),
+        child_slug=child_slug,
     )
 
 

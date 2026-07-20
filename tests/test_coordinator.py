@@ -52,6 +52,26 @@ def _entry(*, fetched_at: str = FETCHED_AT, stale: bool = False) -> MealEntry:
     )
 
 
+def _child_entry(
+    child_key: str,
+    *,
+    fetched_at: str = FETCHED_AT,
+    stale: bool = False,
+) -> MealEntry:
+    return MealEntry(
+        child_key=child_key,
+        week_kind="current",
+        iso_year=2026,
+        iso_week=29,
+        weekday="monday",
+        meal_text=f"{child_key} Pasta",
+        source_date=None,
+        fetched_at=fetched_at,
+        stale=stale,
+        shared_source=False,
+    )
+
+
 def _run(coro: object) -> object:
     return asyncio.run(coro)  # type: ignore[arg-type]
 
@@ -189,6 +209,231 @@ def test_coordinator_restores_sanitized_cached_snapshot() -> None:
 
     assert restored == expected
     assert coordinator.snapshot == expected
+
+
+@pytest.mark.parametrize("cached_entry", [_entry(), _child_entry("max")])
+def test_child_failure_discards_shared_or_foreign_cached_entry(
+    cached_entry: MealEntry,
+) -> None:
+    cached = MealPlanSnapshot(
+        health=MealPlanSnapshot.empty(
+            fetched_at=FETCHED_AT,
+            health_state="ok",
+        ).health,
+        entries=[cached_entry],
+        fetched_at=FETCHED_AT,
+        last_successful_update=FETCHED_AT,
+        shared_source=cached_entry.shared_source,
+    )
+    store = SnapshotStore()
+    _run(store.async_save(cached))
+
+    async def failing_fetch() -> str:
+        raise KitafinoCannotConnectError()
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=failing_fetch,
+        parse_source=lambda source, *, fetched_at: [],
+        store=store,
+        clock=SequenceClock(SECOND_FETCHED_AT),
+        children=[Child("lena", "lena", "child")],
+        child_slug="lena",
+        shared_source=False,
+    )
+
+    assert _run(coordinator.async_load_cached_snapshot()) is None
+    snapshot = _run(coordinator.async_refresh())
+
+    assert snapshot.health.state == "network_error"
+    assert snapshot.entries == []
+    assert snapshot.shared_source is False
+    assert snapshot.children == [Child("lena", "lena", "child")]
+
+
+def test_child_failure_discards_unattributed_empty_shared_cache() -> None:
+    store = SnapshotStore()
+    _run(
+        store.async_save(
+            MealPlanSnapshot.empty(fetched_at=FETCHED_AT, health_state="ok")
+        )
+    )
+
+    async def failing_fetch() -> str:
+        raise KitafinoCannotConnectError()
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=failing_fetch,
+        parse_source=lambda source, *, fetched_at: [],
+        store=store,
+        clock=SequenceClock(SECOND_FETCHED_AT),
+        children=[Child("lena", "lena", "child")],
+        child_slug="lena",
+        shared_source=False,
+    )
+
+    assert _run(coordinator.async_load_cached_snapshot()) is None
+    snapshot = _run(coordinator.async_refresh())
+    assert snapshot.entries == []
+    assert snapshot.health.state == "network_error"
+    assert snapshot.shared_source is False
+
+
+def test_child_failure_reuses_in_memory_empty_snapshot_with_exact_owner() -> None:
+    owner = Child("lena", "lena", "child")
+
+    async def failing_fetch() -> str:
+        raise KitafinoCannotConnectError()
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=failing_fetch,
+        parse_source=lambda source, *, fetched_at: [],
+        clock=SequenceClock(SECOND_FETCHED_AT),
+        children=[owner],
+        child_slug="lena",
+        shared_source=False,
+    )
+    coordinator.snapshot = MealPlanSnapshot(
+        health=MealPlanSnapshot.empty(
+            fetched_at=FETCHED_AT,
+            health_state="ok",
+        ).health,
+        children=[owner],
+        entries=[],
+        fetched_at=FETCHED_AT,
+        last_successful_update=FETCHED_AT,
+        shared_source=False,
+    )
+
+    snapshot = _run(coordinator.async_refresh())
+
+    assert snapshot.health.state == "stale"
+    assert snapshot.entries == []
+    assert snapshot.children == [owner]
+    assert snapshot.shared_source is False
+
+
+def test_child_rejects_persisted_empty_snapshot_after_children_are_stripped() -> None:
+    owner = Child("lena", "lena", "child")
+    store = SnapshotStore()
+    _run(
+        store.async_save(
+            MealPlanSnapshot(
+                health=MealPlanSnapshot.empty(
+                    fetched_at=FETCHED_AT,
+                    health_state="ok",
+                ).health,
+                children=[owner],
+                entries=[],
+                fetched_at=FETCHED_AT,
+                last_successful_update=FETCHED_AT,
+                shared_source=False,
+            )
+        )
+    )
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=lambda: RAW_HTML,
+        parse_source=lambda source, *, fetched_at: [],
+        store=store,
+        clock=SequenceClock(SECOND_FETCHED_AT),
+        children=[owner],
+        child_slug="lena",
+        shared_source=False,
+    )
+
+    assert _run(coordinator.async_load_cached_snapshot()) is None
+
+
+def test_legacy_coordinator_rejects_child_owned_cache() -> None:
+    child_snapshot = MealPlanSnapshot(
+        health=MealPlanSnapshot.empty(
+            fetched_at=FETCHED_AT,
+            health_state="ok",
+        ).health,
+        children=[Child("lena", "lena", "child")],
+        entries=[_child_entry("lena")],
+        fetched_at=FETCHED_AT,
+        last_successful_update=FETCHED_AT,
+        shared_source=False,
+    )
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=lambda: RAW_HTML,
+        parse_source=lambda source, *, fetched_at: [],
+        store=SnapshotStore(raw_data=child_snapshot.to_dict()),
+        clock=SequenceClock(SECOND_FETCHED_AT),
+    )
+
+    assert _run(coordinator.async_load_cached_snapshot()) is None
+
+
+def test_child_failure_rejects_mixed_owner_cache_without_relabeling() -> None:
+    owned_entry = _child_entry("lena")
+    cached = MealPlanSnapshot(
+        health=MealPlanSnapshot.empty(
+            fetched_at=FETCHED_AT,
+            health_state="ok",
+        ).health,
+        entries=[owned_entry, _child_entry("max")],
+        fetched_at=FETCHED_AT,
+        last_successful_update=FETCHED_AT,
+        shared_source=False,
+    )
+    store = SnapshotStore()
+    _run(store.async_save(cached))
+
+    async def failing_fetch() -> str:
+        raise KitafinoCannotConnectError()
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=failing_fetch,
+        parse_source=lambda source, *, fetched_at: [],
+        store=store,
+        clock=SequenceClock(SECOND_FETCHED_AT),
+        children=[Child("lena", "lena", "child")],
+        child_slug="lena",
+        shared_source=False,
+    )
+    restored = _run(coordinator.async_load_cached_snapshot())
+    snapshot = _run(coordinator.async_refresh())
+
+    assert restored is None
+    assert snapshot.entries == []
+    assert snapshot.health.state == "network_error"
+
+
+def test_child_failure_reuses_exact_owned_cache_without_relabeling() -> None:
+    owned_entry = _child_entry("lena")
+    cached = MealPlanSnapshot(
+        health=MealPlanSnapshot.empty(
+            fetched_at=FETCHED_AT,
+            health_state="ok",
+        ).health,
+        entries=[owned_entry],
+        fetched_at=FETCHED_AT,
+        last_successful_update=FETCHED_AT,
+        shared_source=False,
+    )
+    store = SnapshotStore()
+    _run(store.async_save(cached))
+
+    async def failing_fetch() -> str:
+        raise KitafinoCannotConnectError()
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=failing_fetch,
+        parse_source=lambda source, *, fetched_at: [],
+        store=store,
+        clock=SequenceClock(SECOND_FETCHED_AT),
+        children=[Child("lena", "lena", "child")],
+        child_slug="lena",
+        shared_source=False,
+    )
+
+    restored = _run(coordinator.async_load_cached_snapshot())
+    snapshot = _run(coordinator.async_refresh())
+
+    assert restored is not None
+    assert restored.entries == [owned_entry]
+    assert snapshot.entries == [_child_entry("lena", stale=True)]
 
 
 def test_store_rejects_malformed_snapshot_data() -> None:

@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .config_flow import normalize_child_slug
 from .const import (
+    CONF_CHILD_SLUG,
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
@@ -44,6 +46,9 @@ async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str,
     shared_source = options.get(OPTION_SHARED_SOURCE, True)
     if not isinstance(shared_source, bool):
         shared_source = True
+    if normalize_child_slug(data.get(CONF_CHILD_SLUG)) is not None:
+        configured_child_count = 1
+        shared_source = False
     mqtt_enabled = options.get(OPTION_MQTT_ENABLED, False)
     if not isinstance(mqtt_enabled, bool):
         mqtt_enabled = False

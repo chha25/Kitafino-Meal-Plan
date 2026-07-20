@@ -22,6 +22,7 @@ from custom_components.speiseplan.models import (
 )
 from custom_components.speiseplan.sensor import (
     HEALTH_ENTITY_ID,
+    SpeiseplanChildCurrentMealSensor,
     SpeiseplanHealthSensor,
     SpeiseplanSharedCurrentMealSensor,
     async_setup_entry,
@@ -34,8 +35,14 @@ FETCHED_AT = "2026-07-12T06:00:00+02:00"
 
 
 class FakeCoordinator:
-    def __init__(self, snapshot: MealPlanSnapshot | None) -> None:
+    def __init__(
+        self,
+        snapshot: MealPlanSnapshot | None,
+        *,
+        child_slug: str | None = None,
+    ) -> None:
         self.snapshot = snapshot
+        self.child_slug = child_slug
 
 
 class FakeEntry:
@@ -229,6 +236,25 @@ def test_missing_weekday_entry_is_unavailable() -> None:
     }
 
 
+def test_empty_child_sensor_remains_child_owned_and_non_shared() -> None:
+    sensor = SpeiseplanChildCurrentMealSensor(
+        coordinator=FakeCoordinator(None, child_slug="lena"),
+        weekday="tuesday",
+        child_slug="lena",
+    )
+
+    assert sensor.available is False
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {
+        "weekday": "tuesday",
+        "week_kind": "current",
+        "shared_source": False,
+        "stale": None,
+        "last_successful_update": None,
+        "child_key": "lena",
+    }
+
+
 def test_sensor_setup_uses_coordinator_from_hass_data() -> None:
     added: list[Any] = []
     coordinator = FakeCoordinator(_snapshot(_entry("monday", "Pasta")))
@@ -322,6 +348,24 @@ def test_health_sensor_without_snapshot_is_unavailable() -> None:
         "shared_source": True,
         "parser_version": None,
         "fetched_at": None,
+    }
+
+
+def test_child_health_without_snapshot_remains_child_owned() -> None:
+    sensor = SpeiseplanHealthSensor(
+        coordinator=FakeCoordinator(None, child_slug="lena"),
+        child_slug="lena",
+    )
+
+    assert sensor.available is False
+    assert sensor.extra_state_attributes == {
+        "last_successful_update": None,
+        "last_error": None,
+        "configured_child_count": 0,
+        "shared_source": False,
+        "parser_version": None,
+        "fetched_at": None,
+        "child_key": "lena",
     }
 
 

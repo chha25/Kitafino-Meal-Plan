@@ -9,25 +9,30 @@ Version `1.0.0` is prepared as the first stable HACS release. It provides:
 - HACS custom repository installation
 - Home Assistant minimum version `2026.6.4`
 - Initial Home Assistant UI credential setup
-- Child labels, update schedule, reauthentication, reconfiguration, and MQTT options
-- Shared-source Current Week meal sensors first
-- Child-specific sensors deferred until reliable Kitafino evidence exists
+- One independently authenticated config entry and entity set per child
+- Update schedule, reauthentication, reconfiguration, and MQTT options
+- Legacy shared-source Current Week sensors remain compatible
 - Next Week support deferred until reliable Kitafino evidence exists
 - Secure handling of credentials, cookies, diagnostics, fixtures, and examples
 
 The integration includes Home Assistant runtime wiring, authenticated Kitafino retrieval, parsing for the currently observed Kitafino meal-page structure, stale snapshot handling, manual refresh, shared Current Week sensors, redacted diagnostics, and optional MQTT publishing.
 
-## Shared Source and Child Labels
+## Multiple Children and Legacy Entries
 
-Child labels are metadata in the MVP. They help preserve household context in configuration and diagnostics, but they do not mean Kitafino has provided child-specific meals.
+Add the integration once per child. Each setup needs that child's Kitafino credentials and an immutable public slug. Slugs use 1-32 lowercase letters, numbers, or underscores; `shared` is reserved for new entries. Credentials may be identical between entries, but every new-entry slug must be unique.
 
-Child-specific meal sensors are deferred until reliable Kitafino evidence exists. Until then, the integration exposes shared-source Current Week meal sensors and marks shared-source state explicitly in sensor attributes.
+Existing entries created before per-child setup continue in legacy shared mode with their existing entity IDs and options. Historical legacy child rows, including a `shared` row, remain saveable. To convert an entry, remove it and add one new entry per child; credentials and entities are never converted automatically.
 
 Next Week support is deferred until Kitafino exposes it reliably enough to test. Current Week sensors do not depend on Next Week data, and missing or inconsistent Next Week source data should not make Current Week sensors unavailable.
 
 ## Entities and Attributes
 
-The MVP exposes one health sensor and one shared Current Week meal sensor per weekday:
+Each new child entry exposes one health sensor and one Current Week meal sensor per weekday:
+
+- `sensor.speiseplan_{slug}_health`
+- `sensor.speiseplan_{slug}_current_{weekday}`
+
+Legacy shared entries retain:
 
 - `sensor.speiseplan_health`
 - `sensor.speiseplan_shared_current_{weekday}` where `{weekday}` is `monday`, `tuesday`, `wednesday`, `thursday`, or `friday`
@@ -122,7 +127,8 @@ Payloads must not contain Kitafino username, password, cookies, tokens, raw HTML
 1. Add this repository as a HACS custom repository of type `Integration`.
 2. Install the Speiseplan integration through HACS.
 3. Restart Home Assistant if HACS asks for it.
-4. Add the integration through the Home Assistant UI and enter your Kitafino credentials.
+4. Add the integration through the Home Assistant UI and enter one child's slug and Kitafino credentials.
+5. Repeat step 4 for every additional child.
 
 ## Repository Setup
 

@@ -6,8 +6,11 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
+
 from custom_components.speiseplan import PLATFORMS, async_setup_entry, async_unload_entry
 from custom_components.speiseplan.const import (
+    CONF_CHILD_SLUG,
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
@@ -16,10 +19,12 @@ from custom_components.speiseplan.const import (
     OPTION_SHARED_SOURCE,
 )
 from custom_components.speiseplan.coordinator import SpeiseplanDataUpdateCoordinator
+from custom_components.speiseplan.config_flow import async_validate_credential_update
 from custom_components.speiseplan.kitafino.client import (
     KitafinoTransportRequest,
     KitafinoTransportResult,
 )
+from custom_components.speiseplan.kitafino.errors import KitafinoInvalidAuthError
 from custom_components.speiseplan.sensor import SpeiseplanHealthSensor, async_setup_entry as async_setup_sensors
 from custom_components.speiseplan.services import COORDINATOR_KEY
 
@@ -195,6 +200,175 @@ def test_child_options_become_metadata_without_child_specific_sensors() -> None:
     assert [child.child_key for child in coordinator.children] == ["lena", "max"]
     assert [child.display_name for child in coordinator.children] == ["Lena", "Max"]
     assert len(added) == 6
+
+
+def test_two_child_entries_are_isolated_and_have_distinct_entities() -> None:
+    hass = FakeHass()
+    lena = FakeEntry(
+        data={
+            CONF_CHILD_SLUG: "lena",
+            CONF_USERNAME: "same",
+            CONF_PASSWORD: "same",
+        }
+    )
+    lena.entry_id = "entry-lena"
+    max_entry = FakeEntry(
+        data={
+            CONF_CHILD_SLUG: "max",
+            CONF_USERNAME: "same",
+            CONF_PASSWORD: "same",
+        }
+    )
+    max_entry.entry_id = "entry-max"
+    lena_entities: list[Any] = []
+    max_entities: list[Any] = []
+
+    _run(async_setup_entry(hass, lena, kitafino_transport=successful_transport))
+    _run(async_setup_entry(hass, max_entry, kitafino_transport=successful_transport))
+    _run(async_setup_sensors(hass, lena, lena_entities.extend))
+    _run(async_setup_sensors(hass, max_entry, max_entities.extend))
+
+    assert len(lena_entities) + len(max_entities) == 12
+    assert {entity.unique_id for entity in lena_entities}.isdisjoint(
+        {entity.unique_id for entity in max_entities}
+    )
+    assert {entity.child_slug for entity in lena_entities[1:]} == {"lena"}
+    assert {entity.child_slug for entity in max_entities[1:]} == {"max"}
+    assert lena_entities[1].extra_state_attributes["child_key"] == "lena"
+    assert max_entities[1].extra_state_attributes["child_key"] == "max"
+
+    _run(async_unload_entry(hass, lena))
+    survivor = hass.data[DOMAIN][max_entry.entry_id][COORDINATOR_KEY]
+    refreshed = _run(survivor.async_refresh())
+    assert refreshed.health.state == "ok"
+
+
+def test_child_failure_never_falls_back_to_shared_identity() -> None:
+    hass = FakeHass()
+    entry = FakeEntry(
+        data={
+            CONF_CHILD_SLUG: "lena",
+            CONF_USERNAME: "user",
+            CONF_PASSWORD: "secret",
+        }
+    )
+
+    _run(async_setup_entry(hass, entry, kitafino_transport=failing_transport))
+    snapshot = hass.data[DOMAIN][entry.entry_id][COORDINATOR_KEY].snapshot
+
+    assert snapshot.shared_source is False
+    assert [child.child_key for child in snapshot.children] == ["lena"]
+
+
+def test_one_child_failure_does_not_block_other_child_refresh() -> None:
+    hass = FakeHass()
+    failing_entry = FakeEntry(
+        data={
+            CONF_CHILD_SLUG: "lena",
+            CONF_USERNAME: "lena-user",
+            CONF_PASSWORD: "secret",
+        }
+    )
+    failing_entry.entry_id = "entry-lena"
+    healthy_entry = FakeEntry(
+        data={
+            CONF_CHILD_SLUG: "max",
+            CONF_USERNAME: "max-user",
+            CONF_PASSWORD: "secret",
+        }
+    )
+    healthy_entry.entry_id = "entry-max"
+
+    _run(async_setup_entry(hass, failing_entry, kitafino_transport=failing_transport))
+    _run(async_setup_entry(hass, healthy_entry, kitafino_transport=successful_transport))
+    refreshed = _run(
+        hass.data[DOMAIN][healthy_entry.entry_id][COORDINATOR_KEY].async_refresh()
+    )
+
+    assert refreshed.health.state == "ok"
+    assert {meal.child_key for meal in refreshed.entries} == {"max"}
+
+
+@pytest.mark.parametrize("stored_slug", ["shared", " lena "])
+def test_invalid_persisted_child_slug_cannot_create_colliding_entities(
+    stored_slug: str,
+) -> None:
+    hass = FakeHass()
+    entry = FakeEntry(
+        data={
+            CONF_CHILD_SLUG: stored_slug,
+            CONF_USERNAME: "user",
+            CONF_PASSWORD: "secret",
+        }
+    )
+
+    with pytest.raises(ValueError, match="Invalid child slug"):
+        _run(async_setup_entry(hass, entry, kitafino_transport=successful_transport))
+
+    assert entry.entry_id not in hass.data[DOMAIN]
+
+
+def test_reauthentication_preserves_slug_and_entity_identities() -> None:
+    original_data = {
+        CONF_CHILD_SLUG: "lena",
+        CONF_USERNAME: "old-user",
+        CONF_PASSWORD: "old-secret",
+    }
+    before_hass = FakeHass()
+    before_entry = FakeEntry(data=original_data)
+    before_entities: list[Any] = []
+    _run(async_setup_entry(before_hass, before_entry, kitafino_transport=successful_transport))
+    _run(async_setup_sensors(before_hass, before_entry, before_entities.extend))
+
+    async def accept_credentials(username: str, password: str) -> None:
+        return None
+
+    update = _run(
+        async_validate_credential_update(
+            original_data,
+            {CONF_USERNAME: "new-user", CONF_PASSWORD: "new-secret"},
+            validator=accept_credentials,
+        )
+    )
+    after_hass = FakeHass()
+    after_entry = FakeEntry(data=update.entry_data)
+    after_entities: list[Any] = []
+    _run(async_setup_entry(after_hass, after_entry, kitafino_transport=successful_transport))
+    _run(async_setup_sensors(after_hass, after_entry, after_entities.extend))
+
+    assert update.entry_data[CONF_CHILD_SLUG] == "lena"
+    assert [entity.unique_id for entity in before_entities] == [
+        entity.unique_id for entity in after_entities
+    ]
+
+
+def test_failed_reauthentication_leaves_existing_child_entities_unchanged() -> None:
+    original_data = {
+        CONF_CHILD_SLUG: "lena",
+        CONF_USERNAME: "old-user",
+        CONF_PASSWORD: "old-secret",
+    }
+    hass = FakeHass()
+    entry = FakeEntry(data=original_data)
+    entities: list[Any] = []
+    _run(async_setup_entry(hass, entry, kitafino_transport=successful_transport))
+    _run(async_setup_sensors(hass, entry, entities.extend))
+    identities = [entity.unique_id for entity in entities]
+
+    async def reject_credentials(username: str, password: str) -> None:
+        raise KitafinoInvalidAuthError()
+
+    update = _run(
+        async_validate_credential_update(
+            original_data,
+            {CONF_USERNAME: "bad-user", CONF_PASSWORD: "bad-secret"},
+            validator=reject_credentials,
+        )
+    )
+
+    assert update.errors == {"base": "invalid_auth"}
+    assert original_data[CONF_CHILD_SLUG] == "lena"
+    assert [entity.unique_id for entity in entities] == identities
 
 
 def test_failed_initial_refresh_still_publishes_safe_entities() -> None:

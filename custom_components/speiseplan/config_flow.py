@@ -8,6 +8,8 @@ from typing import Any
 
 from .const import (
     CHILD_SLUG_MAX_LENGTH,
+    CHILD_SLUG_RESERVED,
+    CONF_CHILD_SLUG,
     CONF_PASSWORD,
     CONF_USERNAME,
     DEFAULT_MQTT_ENABLED,
@@ -83,7 +85,7 @@ OPTION_KEYS = {
 }
 
 
-def _user_schema_dict() -> dict[Any, type[str]]:
+def _user_schema_dict() -> dict[Any, Any]:
     """Return the config-flow schema mapping."""
     if vol is not None:
         password_field: Any = str
@@ -95,19 +97,62 @@ def _user_schema_dict() -> dict[Any, type[str]]:
             )
 
         return {
+            vol.Required(CONF_CHILD_SLUG): str,
             vol.Required(CONF_USERNAME): str,
             vol.Required(CONF_PASSWORD): password_field,
         }
 
     return {
+        CONF_CHILD_SLUG: str,
         CONF_USERNAME: str,
         CONF_PASSWORD: str,
     }
 
 
-def get_user_schema_keys() -> tuple[str, str]:
+def get_user_schema_keys() -> tuple[str, str, str]:
     """Return user-step schema keys for local tests."""
-    return (CONF_USERNAME, CONF_PASSWORD)
+    return (CONF_CHILD_SLUG, CONF_USERNAME, CONF_PASSWORD)
+
+
+def normalize_child_slug(value: Any) -> str | None:
+    """Return a valid new-entry slug, reserving legacy shared identity."""
+    if not isinstance(value, str):
+        return None
+    slug = value.strip()
+    if (
+        not slug
+        or len(slug) > CHILD_SLUG_MAX_LENGTH
+        or slug in CHILD_SLUG_RESERVED
+        or CHILD_SLUG_PATTERN.fullmatch(slug) is None
+    ):
+        return None
+    return slug
+
+
+def child_unique_id(slug: str) -> str:
+    """Return the stable config-entry identity for a validated slug."""
+    return f"{DOMAIN}:{slug}"
+
+
+def config_entry_unique_id(entry: Any) -> str:
+    """Return an existing identity or derive the compatible identity fallback."""
+    unique_id = getattr(entry, "unique_id", None)
+    if isinstance(unique_id, str) and unique_id:
+        return unique_id
+    data = getattr(entry, "data", {}) or {}
+    slug = normalize_child_slug(data.get(CONF_CHILD_SLUG))
+    return child_unique_id(slug) if slug is not None else DOMAIN
+
+
+def configured_child_slugs(entries: list[Any]) -> set[str]:
+    """Collect normalized new-entry slugs without inspecting credentials."""
+    slugs: set[str] = set()
+    for entry in entries:
+        data = getattr(entry, "data", {}) or {}
+        slug = normalize_child_slug(data.get(CONF_CHILD_SLUG))
+        if slug is not None:
+            slugs.add(slug)
+    return slugs
 
 
 def get_duplicate_setup_abort_reason(has_current_entries: bool) -> str | None:
@@ -128,7 +173,16 @@ def build_user_schema() -> Any:
 
 def build_credential_update_schema() -> Any:
     """Build the Home Assistant credential update schema."""
-    return build_user_schema()
+    if vol is None:
+        return {CONF_USERNAME: str, CONF_PASSWORD: str}
+    schema = _user_schema_dict()
+    return vol.Schema(
+        {
+            key: value
+            for key, value in schema.items()
+            if getattr(key, "schema", key) != CONF_CHILD_SLUG
+        }
+    )
 
 
 def build_default_options() -> dict[str, Any]:
@@ -297,21 +351,72 @@ def build_options_schema(existing_options: dict[str, Any] | None = None) -> Any:
     return vol.Schema(schema_dict)
 
 
+def build_child_options_schema(
+    existing_options: dict[str, Any] | None = None,
+) -> Any:
+    """Build child-entry options without legacy child/display-name controls."""
+    defaults = options_with_defaults(existing_options)
+    schema_dict: dict[Any, Any]
+    if vol is None:
+        schema_dict = {OPTION_UPDATE_TIME: str, OPTION_MQTT_ENABLED: bool}
+    else:
+        schema_dict = {
+            vol.Required(
+                OPTION_UPDATE_TIME,
+                default=defaults[OPTION_UPDATE_TIME],
+            ): str,
+            vol.Required(
+                OPTION_MQTT_ENABLED,
+                default=defaults[OPTION_MQTT_ENABLED],
+            ): bool,
+        }
+    return schema_dict if vol is None else vol.Schema(schema_dict)
+
+
+def normalize_child_options_input(user_input: dict[str, Any]) -> OptionsValidationResult:
+    """Validate only the non-identity options available to child entries."""
+    options = options_with_defaults(user_input)
+    update_time = options.get(OPTION_UPDATE_TIME)
+    mqtt_enabled = options.get(OPTION_MQTT_ENABLED)
+    if not isinstance(update_time, str) or not UPDATE_TIME_PATTERN.fullmatch(
+        update_time
+    ):
+        return OptionsValidationResult(data={}, errors={"base": "invalid_update_time"})
+    if not isinstance(mqtt_enabled, bool):
+        return OptionsValidationResult(data={}, errors={"base": "invalid_options"})
+    return OptionsValidationResult(
+        data={OPTION_UPDATE_TIME: update_time, OPTION_MQTT_ENABLED: mqtt_enabled},
+        errors={},
+    )
+
+
 async def async_validate_user_input(
     user_input: dict[str, Any],
     *,
     validator: CredentialValidator | None = None,
+    require_child_slug: bool = False,
+    existing_child_slugs: set[str] | None = None,
 ) -> ValidationResult:
     """Validate submitted credentials and map failures to safe form errors."""
+    data: dict[str, str] = {}
+    if require_child_slug:
+        slug = normalize_child_slug(user_input.get(CONF_CHILD_SLUG))
+        if slug is None:
+            return ValidationResult(
+                data={}, errors={CONF_CHILD_SLUG: "invalid_child_slug"}
+            )
+        if slug in (existing_child_slugs or set()):
+            return ValidationResult(
+                data={}, errors={CONF_CHILD_SLUG: "duplicate_child_slug"}
+            )
+        data[CONF_CHILD_SLUG] = slug
+
     username = user_input.get(CONF_USERNAME)
     password = user_input.get(CONF_PASSWORD)
     if not isinstance(username, str) or not isinstance(password, str):
         return ValidationResult(data={}, errors={"base": "invalid_auth"})
 
-    data = {
-        CONF_USERNAME: username.strip(),
-        CONF_PASSWORD: password,
-    }
+    data.update({CONF_USERNAME: username.strip(), CONF_PASSWORD: password})
     client = KitafinoClient(
         data[CONF_USERNAME],
         data[CONF_PASSWORD],
@@ -387,19 +492,20 @@ if config_entries is not None:
             self, user_input: dict[str, Any] | None = None
         ) -> Any:
             """Handle the initial user setup step."""
-            await self.async_set_unique_id(DOMAIN)
-            self._abort_if_unique_id_configured()
-
-            if reason := get_duplicate_setup_abort_reason(
-                bool(self._async_current_entries())
-            ):
-                return self.async_abort(reason=reason)
-
             if user_input is not None:
-                result = await async_validate_user_input(user_input)
+                result = await async_validate_user_input(
+                    user_input,
+                    require_child_slug=True,
+                    existing_child_slugs=configured_child_slugs(
+                        self._async_current_entries()
+                    ),
+                )
                 if not result.errors:
+                    slug = result.data[CONF_CHILD_SLUG]
+                    await self.async_set_unique_id(child_unique_id(slug))
+                    self._abort_if_unique_id_configured()
                     return self.async_create_entry(
-                        title=DEFAULT_TITLE,
+                        title=slug,
                         data=result.data,
                     )
 
@@ -438,7 +544,7 @@ if config_entries is not None:
                     errors=result.errors,
                 )
 
-            await self.async_set_unique_id(DOMAIN)
+            await self.async_set_unique_id(config_entry_unique_id(entry))
             self._abort_if_unique_id_mismatch()
             self.hass.config_entries.async_update_entry(
                 entry,
@@ -466,7 +572,7 @@ if config_entries is not None:
                     errors=result.errors,
                 )
 
-            await self.async_set_unique_id(DOMAIN)
+            await self.async_set_unique_id(config_entry_unique_id(entry))
             self._abort_if_unique_id_mismatch()
             self.hass.config_entries.async_update_entry(
                 entry,
@@ -493,20 +599,32 @@ if config_entries is not None:
         ) -> Any:
             """Manage Speiseplan options."""
             current_options = getattr(self.config_entry, "options", {}) or {}
+            entry_data = getattr(self.config_entry, "data", {}) or {}
+            is_child_entry = CONF_CHILD_SLUG in entry_data
             if user_input is not None:
-                result = normalize_options_input(user_input)
+                result = (
+                    normalize_child_options_input(user_input)
+                    if is_child_entry
+                    else normalize_options_input(user_input)
+                )
                 if not result.errors:
                     return self.async_create_entry(title="", data=result.data)
 
                 return self.async_show_form(
                     step_id="init",
-                    data_schema=build_options_schema(
-                        {**current_options, **user_input}
+                    data_schema=(
+                        build_child_options_schema({**current_options, **user_input})
+                        if is_child_entry
+                        else build_options_schema({**current_options, **user_input})
                     ),
                     errors=result.errors,
                 )
 
             return self.async_show_form(
                 step_id="init",
-                data_schema=build_options_schema(current_options),
+                data_schema=(
+                    build_child_options_schema(current_options)
+                    if is_child_entry
+                    else build_options_schema(current_options)
+                ),
             )

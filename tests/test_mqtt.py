@@ -229,6 +229,17 @@ def test_mqtt_entry_identifiers_are_sanitized() -> None:
     )
 
 
+def test_child_routing_preserves_entry_id_root_topic_contract() -> None:
+    assert build_snapshot_topic("entry-lena") == "speiseplan/entry-lena/snapshot"
+    assert (
+        build_entry_topic(
+            "entry-lena",
+            source="lena",
+            week="current",
+            day="monday",
+        )
+        == "speiseplan/entry-lena/meal/lena/current/monday"
+    )
 def test_mqtt_payload_string_fields_are_redacted_when_contaminated() -> None:
     health = HealthStatus(
         state="stale",

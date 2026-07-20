@@ -4,8 +4,9 @@
     "step": {
       "user": {
         "title": "Set up Kitafino Meal Plan",
-        "description": "Enter your Kitafino credentials. They are stored only in the Home Assistant config entry.",
+        "description": "Set up one child. Add the integration again for each additional child. The slug is a permanent public identifier and cannot be changed later.",
         "data": {
+          "child_slug": "Child slug",
           "username": "Kitafino username",
           "password": "Kitafino password"
         }
@@ -30,7 +31,9 @@
     "error": {
       "invalid_auth": "Kitafino rejected the submitted credentials.",
       "cannot_connect": "Could not connect to Kitafino.",
-      "unknown": "Unexpected validation error."
+      "unknown": "Unexpected validation error.",
+      "invalid_child_slug": "Use 1-32 lowercase letters, numbers, or underscores. The slug 'shared' is reserved.",
+      "duplicate_child_slug": "This child slug is already configured."
     },
     "abort": {
       "already_configured": "Kitafino Meal Plan is already configured.",
@@ -43,7 +46,7 @@
     "step": {
       "init": {
         "title": "Kitafino Meal Plan options",
-        "description": "Configure local Home Assistant settings. Child rows use one line per child in the format Display Name:slug.",
+        "description": "Configure local Home Assistant settings. Child rows and shared-source controls are retained only for legacy entries.",
         "data": {
           "children_text": "Children",
           "update_time": "Daily update time",

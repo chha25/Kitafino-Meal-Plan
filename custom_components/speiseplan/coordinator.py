@@ -37,6 +37,7 @@ class SpeiseplanDataUpdateCoordinator:
         parser_version: str | None = None,
         shared_source: bool = True,
         config_entry_id: str | None = None,
+        child_slug: str | None = None,
         operational_logger: RedactedOperationalLogger | None = None,
         snapshot_update_callback: SnapshotUpdateCallback | None = None,
     ) -> None:
@@ -49,13 +50,15 @@ class SpeiseplanDataUpdateCoordinator:
         self.parser_version = parser_version
         self.shared_source = shared_source
         self.config_entry_id = config_entry_id
+        self.child_slug = child_slug
         self.operational_logger = operational_logger or DEFAULT_OPERATIONAL_LOGGER
         self.snapshot_update_callback = snapshot_update_callback
         self.snapshot: MealPlanSnapshot | None = None
 
     async def async_load_cached_snapshot(self) -> MealPlanSnapshot | None:
         """Load the last successful sanitized snapshot into coordinator state."""
-        self.snapshot = await self.store.async_load()
+        cached = await self.store.async_load()
+        self.snapshot = self._owned_cached_snapshot(cached)
         return self.snapshot
 
     async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
@@ -97,7 +100,7 @@ class SpeiseplanDataUpdateCoordinator:
                 fetched_at=fetched_at,
             ),
             children=self.children,
-            entries=entries,
+            entries=[self._stamp_fresh_owner(entry) for entry in entries],
             fetched_at=fetched_at,
             last_successful_update=fetched_at,
             shared_source=self.shared_source,
@@ -125,11 +128,18 @@ class SpeiseplanDataUpdateCoordinator:
         """Build a failure snapshot using prior successful data when available."""
         failure_code = error_code(error)
         prior = self.snapshot or await self.store.async_load()
+        prior = self._owned_cached_snapshot(prior)
         if prior is None:
-            return MealPlanSnapshot.empty(
+            return MealPlanSnapshot(
+                health=HealthStatus(
+                    state=failure_code,
+                    last_error=failure_code,
+                    fetched_at=fetched_at,
+                ),
+                children=self.children,
                 fetched_at=fetched_at,
-                health_state=failure_code,
-                last_error=failure_code,
+                shared_source=self.shared_source,
+                parser_version=self.parser_version,
             )
 
         return MealPlanSnapshot(
@@ -145,6 +155,43 @@ class SpeiseplanDataUpdateCoordinator:
             last_successful_update=prior.last_successful_update,
             shared_source=prior.shared_source,
             parser_version=prior.parser_version,
+        )
+
+    def _stamp_fresh_owner(self, entry: MealEntry) -> MealEntry:
+        """Stamp only freshly parsed output with this authenticated owner."""
+        if self.child_slug is None:
+            return entry
+        return replace(entry, child_key=self.child_slug, shared_source=False)
+
+    def _owned_cached_snapshot(
+        self,
+        snapshot: MealPlanSnapshot | None,
+    ) -> MealPlanSnapshot | None:
+        """Reject shared or foreign cached data for child-owned coordinators."""
+        if snapshot is None:
+            return None
+        if self.child_slug is None:
+            if not snapshot.shared_source or any(
+                not entry.shared_source for entry in snapshot.entries
+            ):
+                return None
+            return snapshot
+        if not snapshot.entries:
+            if snapshot.shared_source or snapshot.children != self.children:
+                return None
+            return snapshot
+        if (
+            snapshot.shared_source
+            or any(
+                entry.shared_source or entry.child_key != self.child_slug
+                for entry in snapshot.entries
+            )
+        ):
+            return None
+        return replace(
+            snapshot,
+            children=self.children,
+            shared_source=False,
         )
 
 

@@ -7,6 +7,7 @@ import asyncio
 from types import SimpleNamespace
 
 from custom_components.speiseplan.const import (
+    CONF_CHILD_SLUG,
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
@@ -40,11 +41,13 @@ def test_public_scaffold_contains_no_forbidden_secret_markers() -> None:
         assert marker not in public_text
 
 
-def test_readme_documents_child_specific_sensors_as_deferred() -> None:
+def test_readme_documents_per_child_setup_and_legacy_conversion() -> None:
     readme = (ROOT / "README.md").read_text()
 
-    assert "Child labels are metadata" in readme
-    assert "Child-specific meal sensors are deferred" in readme
+    assert "Add the integration once per child" in readme
+    assert "immutable public slug" in readme
+    assert "remove it and add one new entry per child" in readme
+    assert "including a `shared` row, remain saveable" in readme
 
 
 def test_readme_documents_next_week_as_deferred() -> None:
@@ -131,6 +134,39 @@ def test_diagnostics_report_child_count_and_shared_source_without_labels() -> No
     assert "max" not in serialized
     assert "parent@example.test" not in serialized
     assert "super-secret" not in serialized
+
+
+def test_child_diagnostics_report_mode_without_exposing_public_slug() -> None:
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_CHILD_SLUG: "lena",
+            CONF_USERNAME: "parent@example.test",
+            CONF_PASSWORD: "super-secret",
+        },
+        options={},
+    )
+
+    diagnostics = asyncio.run(async_get_config_entry_diagnostics(None, entry))
+    serialized = str(diagnostics)
+
+    assert diagnostics["configured_child_count"] == 1
+    assert diagnostics["shared_source"] is False
+    assert "lena" not in serialized
+    assert "parent@example.test" not in serialized
+
+
+def test_invalid_persisted_slug_is_not_reported_as_child_mode() -> None:
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={CONF_CHILD_SLUG: "shared"},
+        options={},
+    )
+
+    diagnostics = asyncio.run(async_get_config_entry_diagnostics(None, entry))
+
+    assert diagnostics["configured_child_count"] == 0
+    assert diagnostics["shared_source"] is True
 
 
 def test_diagnostics_include_redacted_options_and_runtime_snapshot() -> None:
