@@ -37,7 +37,7 @@ Legacy shared entries retain:
 - `sensor.speiseplan_health`
 - `sensor.speiseplan_shared_current_{weekday}` where `{weekday}` is `monday`, `tuesday`, `wednesday`, `thursday`, or `friday`
 
-Meal sensor state is the sanitized meal text for that weekday. Missing Current Week meal data makes the weekday sensor unavailable instead of inventing a value.
+Meal sensor state is the sanitized meal text for that weekday. After a successful refresh, the integration keeps previously known meals that the latest response omitted when they belong to the same child or legacy shared source and the same ISO week. These retained meals remain available with `stale: true`; weekdays that were present in the latest response use the fresh value with `stale: false`. A weekday remains unavailable when no valid meal has ever been observed for it, and meals are never carried across ISO weeks, years, or owners.
 
 Meal sensor attributes are stable and non-secret:
 

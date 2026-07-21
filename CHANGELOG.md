@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Successful partial refreshes retain omitted, previously known meals from the same owner and ISO week as stale instead of making those weekday entities unavailable.
+
 ## [1.1.0] - 2026-07-20
 
 ### Added

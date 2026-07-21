@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 from .kitafino.errors import (
     KitafinoCannotConnectError,
     KitafinoInvalidAuthError,
     error_code,
 )
-from .models import Child, HealthStatus, MealEntry, MealPlanSnapshot
+from .models import (
+    WEEKDAYS,
+    WEEK_KINDS,
+    Child,
+    HealthStatus,
+    MealEntry,
+    MealPlanSnapshot,
+)
 from .operational_logging import (
     DEFAULT_OPERATIONAL_LOGGER,
     RedactedOperationalLogger,
@@ -92,6 +100,11 @@ class SpeiseplanDataUpdateCoordinator:
             await self._async_notify_snapshot_update(snapshot)
             return snapshot
 
+        fresh_entries = [self._stamp_fresh_owner(entry) for entry in entries]
+        merged_entries = await self._merged_successful_entries(
+            fresh_entries,
+            fetched_at=fetched_at,
+        )
         snapshot = MealPlanSnapshot(
             health=HealthStatus(
                 state="ok",
@@ -100,7 +113,7 @@ class SpeiseplanDataUpdateCoordinator:
                 fetched_at=fetched_at,
             ),
             children=self.children,
-            entries=[self._stamp_fresh_owner(entry) for entry in entries],
+            entries=merged_entries,
             fetched_at=fetched_at,
             last_successful_update=fetched_at,
             shared_source=self.shared_source,
@@ -110,6 +123,50 @@ class SpeiseplanDataUpdateCoordinator:
         await self.store.async_save(snapshot)
         await self._async_notify_snapshot_update(snapshot)
         return snapshot
+
+    async def _merged_successful_entries(
+        self,
+        fresh_entries: list[MealEntry],
+        *,
+        fetched_at: str,
+    ) -> list[MealEntry]:
+        """Merge fresh output with the valid prior snapshot by meal identity."""
+        prior = self.snapshot
+        if prior is None:
+            try:
+                prior = await self.store.async_load()
+            except (TypeError, ValueError):
+                prior = None
+        prior = self._owned_cached_snapshot(prior)
+        allowed_scopes = {_entry_scope(entry) for entry in fresh_entries}
+        if not allowed_scopes:
+            allowed_scopes = self._empty_parse_scopes(fetched_at)
+        merged = {
+            _entry_identity(entry): _mark_entry_stale(entry)
+            for entry in (prior.entries if prior is not None else [])
+            if _entry_scope(entry) in allowed_scopes
+        }
+        merged.update({_entry_identity(entry): entry for entry in fresh_entries})
+        return sorted(merged.values(), key=_entry_sort_key)
+
+    def _empty_parse_scopes(
+        self,
+        fetched_at: str,
+    ) -> set[tuple[str, bool, int, int, str]]:
+        """Return this owner's current and next ISO-week scopes at refresh time."""
+        try:
+            fetched_date = datetime.fromisoformat(fetched_at).date()
+        except ValueError:
+            return set()
+        owner = self.child_slug or "shared"
+        scopes = set()
+        for week_kind, date_value in (
+            ("current", fetched_date),
+            ("next", fetched_date + timedelta(days=7)),
+        ):
+            iso_year, iso_week, _ = date_value.isocalendar()
+            scopes.add((owner, self.shared_source, iso_year, iso_week, week_kind))
+        return scopes
 
     async def _async_notify_snapshot_update(
         self,
@@ -160,8 +217,13 @@ class SpeiseplanDataUpdateCoordinator:
     def _stamp_fresh_owner(self, entry: MealEntry) -> MealEntry:
         """Stamp only freshly parsed output with this authenticated owner."""
         if self.child_slug is None:
-            return entry
-        return replace(entry, child_key=self.child_slug, shared_source=False)
+            return replace(entry, stale=False)
+        return replace(
+            entry,
+            child_key=self.child_slug,
+            stale=False,
+            shared_source=False,
+        )
 
     def _owned_cached_snapshot(
         self,
@@ -198,3 +260,31 @@ class SpeiseplanDataUpdateCoordinator:
 def _mark_entry_stale(entry: MealEntry) -> MealEntry:
     """Return a stale copy of a meal entry."""
     return replace(entry, stale=True)
+
+
+def _entry_scope(entry: MealEntry) -> tuple[str, bool, int, int, str]:
+    """Return the owner and week dimensions shared by merge candidates."""
+    return (
+        entry.child_key,
+        entry.shared_source,
+        entry.iso_year,
+        entry.iso_week,
+        entry.week_kind,
+    )
+
+
+def _entry_identity(entry: MealEntry) -> tuple[str, bool, int, int, str, str]:
+    """Return the complete identity for one weekday meal."""
+    return (*_entry_scope(entry), entry.weekday)
+
+
+def _entry_sort_key(entry: MealEntry) -> tuple[int, int, int, str, bool, int]:
+    """Sort entries deterministically by week kind and canonical weekday."""
+    return (
+        WEEK_KINDS.index(entry.week_kind),
+        entry.iso_year,
+        entry.iso_week,
+        entry.child_key,
+        entry.shared_source,
+        WEEKDAYS.index(entry.weekday),
+    )
