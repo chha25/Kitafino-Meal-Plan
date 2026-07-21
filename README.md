@@ -4,7 +4,7 @@ Kitafino Meal Plan is a Home Assistant custom integration for showing Kitafino m
 
 ## Status
 
-Version `1.1.0` is prepared as the next stable HACS release. It provides:
+Version `1.1.1` is prepared as the next stable HACS release. It provides:
 
 - HACS custom repository installation
 - Home Assistant minimum version `2026.6.4`

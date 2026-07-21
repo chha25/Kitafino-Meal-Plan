@@ -72,10 +72,10 @@ def test_release_metadata_is_consistent() -> None:
     readme = (ROOT / "README.md").read_text()
     changelog = (ROOT / "CHANGELOG.md").read_text()
 
-    assert version == "1.1.0"
+    assert version == "1.1.1"
     assert hacs["version"] == version
     assert f"Version `{version}` is prepared" in readme
-    assert changelog.index(f"## [{version}] - 2026-07-20") > changelog.index(
+    assert changelog.index(f"## [{version}] - 2026-07-21") > changelog.index(
         "## [Unreleased]"
     )
     assert (
