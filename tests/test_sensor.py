@@ -43,6 +43,20 @@ class FakeCoordinator:
     ) -> None:
         self.snapshot = snapshot
         self.child_slug = child_slug
+        self.listeners: set[Any] = set()
+
+    def async_add_listener(self, listener: Any) -> Any:
+        self.listeners.add(listener)
+
+        def unsubscribe() -> None:
+            self.listeners.discard(listener)
+
+        return unsubscribe
+
+    def replace_snapshot(self, snapshot: MealPlanSnapshot) -> None:
+        self.snapshot = snapshot
+        for listener in tuple(self.listeners):
+            listener()
 
 
 class FakeEntry:
@@ -267,6 +281,40 @@ def test_sensor_setup_uses_coordinator_from_hass_data() -> None:
     assert all(
         isinstance(sensor, SpeiseplanSharedCurrentMealSensor) for sensor in added[1:]
     )
+
+
+def test_meal_and_health_entities_write_state_for_fresh_and_failure_snapshots() -> None:
+    coordinator = FakeCoordinator(_snapshot(_entry("monday", "Pasta")))
+    sensors = [
+        SpeiseplanHealthSensor(coordinator=coordinator),
+        SpeiseplanSharedCurrentMealSensor(coordinator=coordinator, weekday="monday"),
+    ]
+    writes = [0, 0]
+    removals: list[Any] = []
+    for index, sensor in enumerate(sensors):
+        sensor.async_write_ha_state = lambda index=index: writes.__setitem__(  # type: ignore[attr-defined]
+            index, writes[index] + 1
+        )
+        sensor.async_on_remove = removals.append  # type: ignore[attr-defined]
+        _run(sensor.async_added_to_hass())
+
+    coordinator.replace_snapshot(_snapshot(_entry("monday", "Soup")))
+    coordinator.replace_snapshot(
+        _snapshot(
+            _entry("monday", "Soup", stale=True),
+            health_state="stale",
+            last_error="network_error",
+        )
+    )
+
+    assert writes == [2, 2]
+    assert sensors[0].native_value == "stale"
+    assert sensors[1].native_value == "Soup"
+    for remove in removals:
+        remove()
+    coordinator.replace_snapshot(_snapshot(_entry("monday", "Rice")))
+    assert writes == [2, 2]
+    assert coordinator.listeners == set()
 
 
 def test_integration_setup_forwards_sensor_platform() -> None:

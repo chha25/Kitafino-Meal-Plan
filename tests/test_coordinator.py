@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
+import logging
 
 import pytest
 
@@ -17,7 +18,13 @@ from custom_components.speiseplan.kitafino.errors import (
     KitafinoInvalidAuthError,
     KitafinoParseError,
 )
-from custom_components.speiseplan.models import Child, MealEntry, MealPlanSnapshot
+from custom_components.speiseplan.models import (
+    Child,
+    HealthStatus,
+    MealEntry,
+    MealPlanSnapshot,
+)
+from custom_components.speiseplan.operational_logging import RedactedOperationalLogger
 from custom_components.speiseplan.storage import SnapshotStore
 
 
@@ -87,6 +94,115 @@ def _run(coro: object) -> object:
 
 async def _fetch_source() -> str:
     return RAW_HTML
+
+
+def test_overlapping_refreshes_are_serialized_and_cannot_overwrite_out_of_order() -> None:
+    async def scenario() -> None:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        active_fetches = 0
+        max_active_fetches = 0
+        sources = iter(("first", "second"))
+
+        async def fetch_source() -> str:
+            nonlocal active_fetches, max_active_fetches
+            source = next(sources)
+            active_fetches += 1
+            max_active_fetches = max(max_active_fetches, active_fetches)
+            if source == "first":
+                first_started.set()
+                await release_first.wait()
+            active_fetches -= 1
+            return source
+
+        def parse_source(source: str, *, fetched_at: str) -> list[MealEntry]:
+            return [_entry(fetched_at=fetched_at, meal_text=source)]
+
+        coordinator = SpeiseplanDataUpdateCoordinator(
+            fetch_source=fetch_source,
+            parse_source=parse_source,
+            clock=SequenceClock(FETCHED_AT, SECOND_FETCHED_AT),
+        )
+        first = asyncio.create_task(coordinator.async_refresh())
+        await first_started.wait()
+        second = asyncio.create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        assert max_active_fetches == 1
+        release_first.set()
+        await asyncio.gather(first, second)
+
+        assert max_active_fetches == 1
+        assert coordinator.snapshot is not None
+        assert coordinator.snapshot.entries[0].meal_text == "second"
+
+    _run(scenario())
+
+
+def test_storage_failure_does_not_replace_or_notify_snapshot() -> None:
+    prior = MealPlanSnapshot(
+        health=HealthStatus(state="ok"),
+        entries=[_entry(meal_text="prior")],
+    )
+
+    class FailingStore(SnapshotStore):
+        async def async_save(self, snapshot: MealPlanSnapshot) -> None:
+            raise RuntimeError("storage failed")
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=_fetch_source,
+        parse_source=lambda source, *, fetched_at: [
+            _entry(fetched_at=fetched_at, meal_text="new")
+        ],
+        store=FailingStore(),
+        clock=SequenceClock(FETCHED_AT),
+    )
+    coordinator.snapshot = prior
+    notifications = 0
+
+    def listener() -> None:
+        nonlocal notifications
+        notifications += 1
+
+    coordinator.async_add_listener(listener)
+
+    with pytest.raises(RuntimeError, match="storage failed"):
+        _run(coordinator.async_refresh())
+
+    assert coordinator.snapshot is prior
+    assert notifications == 0
+
+
+def test_listener_failure_isolated_from_later_listeners_and_projection(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls: list[str] = []
+    logger = logging.getLogger("speiseplan.test.listener-isolation")
+
+    async def projection(snapshot: MealPlanSnapshot) -> None:
+        calls.append("projection")
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=_fetch_source,
+        parse_source=lambda source, *, fetched_at: [_entry(fetched_at=fetched_at)],
+        clock=SequenceClock(FETCHED_AT),
+        snapshot_update_callback=projection,
+        operational_logger=RedactedOperationalLogger(logger=logger),
+    )
+
+    def failing_listener() -> None:
+        calls.append("failing")
+        raise RuntimeError("RAW_KITAFINO_HTML_CAPTURE callback secret")
+
+    coordinator.async_add_listener(failing_listener)
+    coordinator.async_add_listener(lambda: calls.append("healthy"))
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        _run(coordinator.async_refresh())
+
+    assert sorted(calls) == ["failing", "healthy", "projection"]
+    assert "failure_class=unknown_error" in caplog.text
+    assert "RAW_KITAFINO_HTML_CAPTURE" not in caplog.text
+    assert "callback secret" not in caplog.text
 
 
 def test_successful_refresh_stores_fresh_snapshot_and_sanitized_cache() -> None:

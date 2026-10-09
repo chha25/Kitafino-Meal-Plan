@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import json
 from typing import Any
 
 import pytest
 
+import custom_components.speiseplan as integration_module
 from custom_components.speiseplan import PLATFORMS, async_setup_entry, async_unload_entry
 from custom_components.speiseplan.const import (
     CONF_CHILD_SLUG,
@@ -17,6 +19,7 @@ from custom_components.speiseplan.const import (
     FORBIDDEN_SECRET_MARKERS,
     OPTION_CHILDREN,
     OPTION_SHARED_SOURCE,
+    OPTION_UPDATE_TIME,
 )
 from custom_components.speiseplan.coordinator import SpeiseplanDataUpdateCoordinator
 from custom_components.speiseplan.config_flow import async_validate_credential_update
@@ -52,12 +55,16 @@ class FakeConfigEntries:
         self.unloaded: list[tuple[Any, tuple[str, ...]]] = []
         self.coordinator_was_present_on_forward = False
         self.unload_result = True
+        self.reloaded: list[str] = []
+        self.forward_error: Exception | None = None
 
     async def async_forward_entry_setups(
         self,
         entry: Any,
         platforms: tuple[str, ...],
     ) -> None:
+        if self.forward_error is not None:
+            raise self.forward_error
         self.coordinator_was_present_on_forward = (
             COORDINATOR_KEY in self.hass.data[DOMAIN][entry.entry_id]
         )
@@ -70,6 +77,9 @@ class FakeConfigEntries:
     ) -> bool:
         self.unloaded.append((entry, platforms))
         return self.unload_result
+
+    async def async_reload(self, entry_id: str) -> None:
+        self.reloaded.append(entry_id)
 
 
 class FakeServices:
@@ -98,6 +108,27 @@ class FakeEntry:
             CONF_PASSWORD: "super-secret",
         }
         self.options = options or {}
+
+
+class ScheduledFakeHass(FakeHass):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bus = object()
+
+
+class ScheduledFakeEntry(FakeEntry):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.update_listeners: list[Any] = []
+        self.update_listener_unsubscribed = 0
+
+    def add_update_listener(self, listener: Any) -> Any:
+        self.update_listeners.append(listener)
+
+        def unsubscribe() -> None:
+            self.update_listener_unsubscribed += 1
+
+        return unsubscribe
 
 
 def _run(coro: object) -> object:
@@ -152,6 +183,113 @@ def test_setup_builds_coordinator_before_forwarding_sensor_platform() -> None:
     assert coordinator.snapshot.health.state == "ok"
     assert [entry.week_kind for entry in coordinator.snapshot.entries] == ["current"]
     assert coordinator.snapshot.entries[0].meal_text == "Synthetic pasta"
+
+
+def test_setup_schedules_one_daily_local_refresh_and_options_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = ScheduledFakeHass()
+    entry = ScheduledFakeEntry(options={OPTION_UPDATE_TIME: "07:35"})
+    schedules: list[tuple[Any, int, int, int]] = []
+    cancelled: list[bool] = []
+
+    def track_time_change(
+        tracked_hass: Any,
+        action: Any,
+        *,
+        hour: int,
+        minute: int,
+        second: int,
+    ) -> Any:
+        assert tracked_hass is hass
+        schedules.append((action, hour, minute, second))
+
+        def unsubscribe() -> None:
+            cancelled.append(True)
+
+        return unsubscribe
+
+    monkeypatch.setattr(integration_module, "async_track_time_change", track_time_change)
+    _run(async_setup_entry(hass, entry, kitafino_transport=successful_transport))
+
+    assert [(hour, minute, second) for _, hour, minute, second in schedules] == [
+        (7, 35, 0)
+    ]
+    assert len(entry.update_listeners) == 1
+    _run(entry.update_listeners[0](hass, entry))
+    assert hass.config_entries.reloaded == [entry.entry_id]
+
+    coordinator = hass.data[DOMAIN][entry.entry_id][COORDINATOR_KEY]
+    snapshot = coordinator.snapshot
+    _run(async_unload_entry(hass, entry))
+    assert cancelled == [True]
+    assert entry.update_listener_unsubscribed == 1
+
+    _run(schedules[0][0](datetime.now()))
+    assert coordinator.snapshot is snapshot
+
+
+def test_setup_failure_cleans_all_callbacks_even_when_one_cleanup_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = ScheduledFakeHass()
+    hass.config_entries.forward_error = RuntimeError("forward failed")
+    entry = ScheduledFakeEntry()
+    schedule_cancelled = 0
+
+    def track_time_change(hass: Any, action: Any, **kwargs: Any) -> Any:
+        def unsubscribe() -> None:
+            nonlocal schedule_cancelled
+            schedule_cancelled += 1
+            raise RuntimeError("cancel failed")
+
+        return unsubscribe
+
+    monkeypatch.setattr(integration_module, "async_track_time_change", track_time_change)
+
+    with pytest.raises(RuntimeError, match="forward failed"):
+        _run(async_setup_entry(hass, entry, kitafino_transport=successful_transport))
+
+    assert schedule_cancelled == 1
+    assert entry.update_listener_unsubscribed == 1
+    assert entry.entry_id not in hass.data[DOMAIN]
+
+
+def test_scheduled_callback_refreshes_only_its_own_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = ScheduledFakeHass()
+    first = ScheduledFakeEntry(options={OPTION_UPDATE_TIME: "06:00"})
+    first.entry_id = "entry-first"
+    second = ScheduledFakeEntry(options={OPTION_UPDATE_TIME: "08:15"})
+    second.entry_id = "entry-second"
+    callbacks: list[Any] = []
+    cancelled: list[int] = []
+
+    def track_time_change(hass: Any, action: Any, **kwargs: Any) -> Any:
+        index = len(callbacks)
+        callbacks.append(action)
+
+        def unsubscribe() -> None:
+            cancelled.append(index)
+
+        return unsubscribe
+
+    monkeypatch.setattr(integration_module, "async_track_time_change", track_time_change)
+    _run(async_setup_entry(hass, first, kitafino_transport=successful_transport))
+    _run(async_setup_entry(hass, second, kitafino_transport=successful_transport))
+    first_coordinator = hass.data[DOMAIN][first.entry_id][COORDINATOR_KEY]
+    second_coordinator = hass.data[DOMAIN][second.entry_id][COORDINATOR_KEY]
+    first_before = first_coordinator.snapshot
+    second_before = second_coordinator.snapshot
+
+    _run(callbacks[0](datetime.now()))
+
+    assert first_coordinator.snapshot is not first_before
+    assert second_coordinator.snapshot is second_before
+    _run(async_unload_entry(hass, first))
+    assert cancelled == [0]
+    assert second.entry_id in hass.data[DOMAIN]
 
 
 def test_sensor_setup_creates_entities_from_runtime_coordinator() -> None:

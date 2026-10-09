@@ -19,7 +19,13 @@ from .kitafino.errors import (
 
 _LOGGER = logging.getLogger(__package__ or DOMAIN)
 DEFAULT_LOG_DEDUP_INTERVAL_SECONDS = 300.0
-SAFE_PHASES = ("setup", "refresh", "manual_refresh", "config_validation")
+SAFE_PHASES = (
+    "setup",
+    "refresh",
+    "scheduled_refresh",
+    "manual_refresh",
+    "config_validation",
+)
 SAFE_FAILURE_CLASSES = (
     ERROR_LOGIN_FAILED,
     ERROR_NETWORK,

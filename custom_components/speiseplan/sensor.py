@@ -21,7 +21,19 @@ except ModuleNotFoundError:  # pragma: no cover - local tests without HA install
 HEALTH_ENTITY_ID = "sensor.speiseplan_health"
 
 
-class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
+class _SpeiseplanCoordinatorSensor:
+    """Subscribe an entity to coordinator snapshot replacements."""
+
+    async def async_added_to_hass(self) -> None:
+        """Register the entity state-write listener."""
+        parent_added = getattr(super(), "async_added_to_hass", None)
+        if callable(parent_added):
+            await parent_added()
+        unsubscribe = self.coordinator.async_add_listener(self.async_write_ha_state)
+        self.async_on_remove(unsubscribe)
+
+
+class SpeiseplanHealthSensor(_SpeiseplanCoordinatorSensor, SensorEntity):  # type: ignore[misc]
     """Integration health and freshness sensor."""
 
     def __init__(self, *, coordinator: Any, child_slug: str | None = None) -> None:
@@ -108,7 +120,10 @@ class SpeiseplanHealthSensor(SensorEntity):  # type: ignore[misc]
             return snapshot
         return None
 
-class SpeiseplanSharedCurrentMealSensor(SensorEntity):  # type: ignore[misc]
+class SpeiseplanSharedCurrentMealSensor(
+    _SpeiseplanCoordinatorSensor,
+    SensorEntity,
+):  # type: ignore[misc]
     """Shared-source current-week meal sensor."""
 
     def __init__(self, *, coordinator: Any, weekday: str) -> None:

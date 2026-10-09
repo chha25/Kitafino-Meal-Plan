@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
+
+try:
+    from homeassistant.helpers.event import async_track_time_change
+except ModuleNotFoundError:  # pragma: no cover - local tests without HA installed
+    async_track_time_change = None  # type: ignore[assignment]
 
 from .config_flow import build_default_options, normalize_child_slug
 from .const import (
@@ -13,6 +18,7 @@ from .const import (
     DOMAIN,
     OPTION_CHILDREN,
     OPTION_SHARED_SOURCE,
+    OPTION_UPDATE_TIME,
 )
 from .coordinator import SpeiseplanDataUpdateCoordinator
 from .kitafino.client import KitafinoClient, KitafinoTransport
@@ -23,6 +29,8 @@ from .services import COORDINATOR_KEY, async_setup_services
 from .storage import SnapshotStore
 
 PLATFORMS: tuple[str, ...] = ("sensor",)
+SCHEDULE_UNSUB_KEY = "schedule_unsub"
+OPTIONS_UNSUB_KEY = "options_unsub"
 
 
 async def async_setup_entry(
@@ -39,23 +47,35 @@ async def async_setup_entry(
     )
     await coordinator.async_load_cached_snapshot()
     snapshot = await coordinator.async_refresh(phase="setup")
-    hass.data[DOMAIN][entry.entry_id] = {
+    runtime_data = {
         "entry": entry,
         COORDINATOR_KEY: coordinator,
     }
-    await async_setup_services(hass)
-    config_entries = getattr(hass, "config_entries", None)
-    forward_setups = getattr(config_entries, "async_forward_entry_setups", None)
-    if callable(forward_setups):
-        await forward_setups(entry, PLATFORMS)
-    coordinator.snapshot_update_callback = (
-        lambda updated_snapshot: async_schedule_publish_if_enabled(
-            hass,
-            entry,
-            updated_snapshot,
+    hass.data[DOMAIN][entry.entry_id] = runtime_data
+    try:
+        schedule_unsub = _schedule_daily_refresh(hass, entry, coordinator)
+        if schedule_unsub is not None:
+            runtime_data[SCHEDULE_UNSUB_KEY] = schedule_unsub
+        add_update_listener = getattr(entry, "add_update_listener", None)
+        if callable(add_update_listener):
+            runtime_data[OPTIONS_UNSUB_KEY] = add_update_listener(_async_reload_entry)
+        await async_setup_services(hass)
+        config_entries = getattr(hass, "config_entries", None)
+        forward_setups = getattr(config_entries, "async_forward_entry_setups", None)
+        if callable(forward_setups):
+            await forward_setups(entry, PLATFORMS)
+        coordinator.snapshot_update_callback = (
+            lambda updated_snapshot: async_schedule_publish_if_enabled(
+                hass,
+                entry,
+                updated_snapshot,
+            )
         )
-    )
-    await async_schedule_publish_if_enabled(hass, entry, snapshot)
+        await async_schedule_publish_if_enabled(hass, entry, snapshot)
+    except Exception:
+        _cleanup_runtime_callbacks(runtime_data)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        raise
     return True
 
 
@@ -69,8 +89,61 @@ async def async_unload_entry(hass: Any, entry: Any) -> bool:
             return False
 
     domain_data = hass.data.get(DOMAIN, {})
-    domain_data.pop(entry.entry_id, None)
+    runtime_data = domain_data.pop(entry.entry_id, None)
+    if isinstance(runtime_data, dict):
+        _cleanup_runtime_callbacks(runtime_data)
     return True
+
+
+def _schedule_daily_refresh(
+    hass: Any,
+    entry: Any,
+    coordinator: SpeiseplanDataUpdateCoordinator,
+) -> Any:
+    """Schedule one refresh per day in Home Assistant local time."""
+    if not hasattr(hass, "bus") or async_track_time_change is None:
+        return None
+
+    options = _options_with_defaults(getattr(entry, "options", {}) or {})
+    configured_time = time.fromisoformat(options[OPTION_UPDATE_TIME])
+
+    active = True
+
+    async def async_scheduled_refresh(now: datetime) -> None:
+        if not active:
+            return
+        await coordinator.async_refresh(phase="scheduled_refresh")
+
+    unsubscribe_schedule = async_track_time_change(
+        hass,
+        async_scheduled_refresh,
+        hour=configured_time.hour,
+        minute=configured_time.minute,
+        second=0,
+    )
+
+    def unsubscribe() -> None:
+        nonlocal active
+        active = False
+        unsubscribe_schedule()
+
+    return unsubscribe
+
+
+def _cleanup_runtime_callbacks(runtime_data: dict[str, Any]) -> None:
+    """Run all runtime cleanup handles independently."""
+    for key in (SCHEDULE_UNSUB_KEY, OPTIONS_UNSUB_KEY):
+        unsubscribe = runtime_data.get(key)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                continue
+
+
+async def _async_reload_entry(hass: Any, entry: Any) -> None:
+    """Reload an entry when options such as its daily time change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def build_runtime_coordinator(

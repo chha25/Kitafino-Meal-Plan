@@ -11,6 +11,7 @@ from typing import Any
 import custom_components.speiseplan.services as services_module
 from custom_components.speiseplan.const import DOMAIN, FORBIDDEN_SECRET_MARKERS
 from custom_components.speiseplan import async_setup_entry
+from custom_components.speiseplan.coordinator import SpeiseplanDataUpdateCoordinator
 from custom_components.speiseplan.kitafino.errors import KitafinoCannotConnectError
 from custom_components.speiseplan.models import HealthStatus, MealEntry, MealPlanSnapshot
 from custom_components.speiseplan.mqtt import build_snapshot_payload
@@ -53,7 +54,6 @@ class FakeCoordinator:
         self.snapshots = list(snapshots)
         self.calls = 0
         self.snapshot: MealPlanSnapshot | None = None
-
     async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
         self.calls += 1
         if not self.snapshots:
@@ -112,7 +112,7 @@ def _stale_snapshot() -> MealPlanSnapshot:
     )
 
 
-def _hass_with_coordinator(coordinator: FakeCoordinator) -> FakeHass:
+def _hass_with_coordinator(coordinator: Any) -> FakeHass:
     hass = FakeHass()
     hass.data[DOMAIN] = {
         "entry-1": {
@@ -165,6 +165,42 @@ def test_manual_refresh_delegates_to_coordinator_and_returns_sanitized_snapshot(
     assert result["refreshed"] == 1
     assert result["throttled"] is False
     assert result["snapshots"] == [build_snapshot_payload(_ok_snapshot())]
+
+
+def test_accepted_manual_refresh_notifies_listeners_but_throttled_refresh_does_not() -> None:
+    async def fetch_source() -> str:
+        return "synthetic"
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=fetch_source,
+        parse_source=lambda source, *, fetched_at: [_entry()],
+        clock=lambda: FETCHED_AT,
+    )
+    hass = _hass_with_coordinator(coordinator)
+    throttler = ManualRefreshThrottler()
+    notifications = 0
+
+    def listener() -> None:
+        nonlocal notifications
+        notifications += 1
+
+    coordinator.async_add_listener(listener)
+    first_at = datetime(2026, 7, 12, 6, 0, tzinfo=UTC)
+    first = _run(
+        async_handle_manual_refresh(hass, throttler=throttler, now=first_at)
+    )
+    throttled = _run(
+        async_handle_manual_refresh(
+            hass,
+            throttler=throttler,
+            now=first_at + timedelta(minutes=1),
+        )
+    )
+
+    assert first["throttled"] is False
+    assert throttled["throttled"] is True
+    assert notifications == 1
+    assert coordinator.snapshot is not None
 
 
 def test_manual_refresh_ignores_internal_domain_data_keys() -> None:

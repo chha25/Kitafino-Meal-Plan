@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -29,6 +30,7 @@ FetchSource = Callable[[], Awaitable[str]]
 ParseSource = Callable[[str], list[MealEntry]]
 Clock = Callable[[], str]
 SnapshotUpdateCallback = Callable[[MealPlanSnapshot], Awaitable[None]]
+SnapshotListener = Callable[[], None]
 
 
 class SpeiseplanDataUpdateCoordinator:
@@ -62,6 +64,17 @@ class SpeiseplanDataUpdateCoordinator:
         self.operational_logger = operational_logger or DEFAULT_OPERATIONAL_LOGGER
         self.snapshot_update_callback = snapshot_update_callback
         self.snapshot: MealPlanSnapshot | None = None
+        self._listeners: set[SnapshotListener] = set()
+        self._refresh_lock = asyncio.Lock()
+
+    def async_add_listener(self, listener: SnapshotListener) -> Callable[[], None]:
+        """Subscribe to snapshot replacements and return an unsubscribe callback."""
+        self._listeners.add(listener)
+
+        def unsubscribe() -> None:
+            self._listeners.discard(listener)
+
+        return unsubscribe
 
     async def async_load_cached_snapshot(self) -> MealPlanSnapshot | None:
         """Load the last successful sanitized snapshot into coordinator state."""
@@ -71,6 +84,11 @@ class SpeiseplanDataUpdateCoordinator:
 
     async def async_refresh(self, *, phase: str = "refresh") -> MealPlanSnapshot:
         """Refresh source data and apply stale policy on failure."""
+        async with self._refresh_lock:
+            return await self._async_refresh_locked(phase=phase)
+
+    async def _async_refresh_locked(self, *, phase: str) -> MealPlanSnapshot:
+        """Refresh once while the public refresh lock is held."""
         fetched_at = self.clock()
         try:
             source = await self.fetch_source()
@@ -119,8 +137,8 @@ class SpeiseplanDataUpdateCoordinator:
             shared_source=self.shared_source,
             parser_version=self.parser_version,
         )
-        self.snapshot = snapshot
         await self.store.async_save(snapshot)
+        self.snapshot = snapshot
         await self._async_notify_snapshot_update(snapshot)
         return snapshot
 
@@ -172,7 +190,16 @@ class SpeiseplanDataUpdateCoordinator:
         self,
         snapshot: MealPlanSnapshot,
     ) -> None:
-        """Notify an optional projection hook after snapshot state changes."""
+        """Notify native entities and the optional projection hook."""
+        for listener in tuple(self._listeners):
+            try:
+                listener()
+            except Exception:
+                self.operational_logger.log_failure(
+                    entry_id=self.config_entry_id,
+                    phase="refresh",
+                    failure_class="unknown_error",
+                )
         if self.snapshot_update_callback is not None:
             await self.snapshot_update_callback(snapshot)
 
