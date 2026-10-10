@@ -139,7 +139,17 @@ class SpeiseplanDataUpdateCoordinator:
         )
         await self.store.async_save(snapshot)
         self.snapshot = snapshot
-        await self._async_notify_snapshot_update(snapshot)
+        notifications_succeeded = await self._async_notify_snapshot_update(snapshot)
+        if notifications_succeeded:
+            try:
+                self.operational_logger.log_success(
+                    entry_id=self.config_entry_id,
+                    phase=phase,
+                    entry_count=len(snapshot.entries),
+                )
+            except Exception:
+                # Operational telemetry must never fail a completed refresh.
+                pass
         return snapshot
 
     async def _merged_successful_entries(
@@ -189,12 +199,14 @@ class SpeiseplanDataUpdateCoordinator:
     async def _async_notify_snapshot_update(
         self,
         snapshot: MealPlanSnapshot,
-    ) -> None:
+    ) -> bool:
         """Notify native entities and the optional projection hook."""
+        succeeded = True
         for listener in tuple(self._listeners):
             try:
                 listener()
             except Exception:
+                succeeded = False
                 self.operational_logger.log_failure(
                     entry_id=self.config_entry_id,
                     phase="refresh",
@@ -202,6 +214,7 @@ class SpeiseplanDataUpdateCoordinator:
                 )
         if self.snapshot_update_callback is not None:
             await self.snapshot_update_callback(snapshot)
+        return succeeded
 
     async def _snapshot_for_failure(
         self,

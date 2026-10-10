@@ -326,6 +326,100 @@ def test_successful_refresh_does_not_log_warning(caplog: object) -> None:
     assert caplog.text == ""  # type: ignore[attr-defined]
 
 
+def test_success_logger_emits_allowlisted_info_and_accepts_zero_entries(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger = logging.getLogger("speiseplan.test.logging.success-info")
+    operational_logger = RedactedOperationalLogger(logger=logger, clock=FakeClock())
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        emitted = operational_logger.log_success(
+            entry_id="entry-1",
+            phase="setup",
+            entry_count=0,
+        )
+
+    assert emitted is True
+    assert (
+        "Speiseplan operation succeeded: entry_id=entry-1 phase=setup "
+        "health=ok entry_count=0"
+    ) in caplog.text
+
+
+def test_success_logs_are_rate_limited_per_entry_and_phase(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger = logging.getLogger("speiseplan.test.logging.success-dedup")
+    clock = FakeClock()
+    operational_logger = RedactedOperationalLogger(logger=logger, clock=clock)
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        assert operational_logger.log_success(
+            entry_id="entry-1", phase="scheduled_refresh", entry_count=1
+        )
+        clock.value = 60
+        assert not operational_logger.log_success(
+            entry_id="entry-1", phase="scheduled_refresh", entry_count=2
+        )
+        assert operational_logger.log_success(
+            entry_id="entry-1", phase="manual_refresh", entry_count=2
+        )
+        assert operational_logger.log_success(
+            entry_id="entry-2", phase="scheduled_refresh", entry_count=2
+        )
+        clock.value = 3600
+        assert operational_logger.log_success(
+            entry_id="entry-1", phase="scheduled_refresh", entry_count=3
+        )
+
+    assert caplog.text.count("operation succeeded") == 4
+    assert "entry_count=1" in caplog.text
+    assert "entry_count=3" in caplog.text
+
+
+@pytest.mark.parametrize("entry_count", [True, -1, "1", UnsafeAllowedStatus(1)])
+def test_success_logger_normalizes_hostile_values(
+    caplog: pytest.LogCaptureFixture,
+    entry_count: object,
+) -> None:
+    logger = logging.getLogger("speiseplan.test.logging.success-normalize")
+    operational_logger = RedactedOperationalLogger(logger=logger, clock=FakeClock())
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        operational_logger.log_success(
+            entry_id="parent@example.test",
+            phase=UnsafeDiagnosticValue(),  # type: ignore[arg-type]
+            entry_count=entry_count,
+        )
+
+    assert "entry_id=unknown" in caplog.text
+    assert "phase=unknown" in caplog.text
+    assert "health=ok" in caplog.text
+    assert "entry_count=0" in caplog.text
+    assert "parent@example.test" not in caplog.text
+    assert "REAL_SESSION_COOKIE_VALUE" not in caplog.text
+
+
+def test_success_and_failure_rate_limits_are_independent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger = logging.getLogger("speiseplan.test.logging.independent-limits")
+    operational_logger = RedactedOperationalLogger(logger=logger, clock=FakeClock())
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        assert operational_logger.log_success(
+            entry_id="entry-1", phase="refresh", entry_count=1
+        )
+        assert operational_logger.log_failure(
+            entry_id="entry-1",
+            phase="refresh",
+            failure_class="network_error",
+        )
+
+    assert "operation succeeded" in caplog.text
+    assert "operation failed" in caplog.text
+
+
 def test_refresh_failure_logs_distinct_failure_classes(caplog: object) -> None:
     logger = logging.getLogger("speiseplan.test.logging.classes")
 

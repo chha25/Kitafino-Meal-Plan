@@ -172,6 +172,118 @@ def test_storage_failure_does_not_replace_or_notify_snapshot() -> None:
     assert notifications == 0
 
 
+def test_success_is_logged_after_storage_listeners_and_projection() -> None:
+    calls: list[str] = []
+
+    class RecordingStore(SnapshotStore):
+        async def async_save(self, snapshot: MealPlanSnapshot) -> None:
+            calls.append("store")
+            await super().async_save(snapshot)
+
+    class RecordingLogger(RedactedOperationalLogger):
+        def log_success(self, **kwargs: object) -> bool:
+            calls.append("log_success")
+            assert kwargs == {
+                "entry_id": "entry-1",
+                "phase": "manual_refresh",
+                "entry_count": 1,
+            }
+            return True
+
+    async def projection(snapshot: MealPlanSnapshot) -> None:
+        calls.append("projection")
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=_fetch_source,
+        parse_source=lambda source, *, fetched_at: [_entry(fetched_at=fetched_at)],
+        store=RecordingStore(),
+        clock=SequenceClock(FETCHED_AT),
+        config_entry_id="entry-1",
+        operational_logger=RecordingLogger(),
+        snapshot_update_callback=projection,
+    )
+    coordinator.async_add_listener(lambda: calls.append("listener"))
+
+    _run(coordinator.async_refresh(phase="manual_refresh"))
+
+    assert calls == ["store", "listener", "projection", "log_success"]
+
+
+@pytest.mark.parametrize("failure_point", ["fetch", "parse", "store", "projection"])
+def test_exception_before_refresh_completion_prevents_success_log(
+    failure_point: str,
+) -> None:
+    calls: list[str] = []
+
+    class MaybeFailingStore(SnapshotStore):
+        async def async_save(self, snapshot: MealPlanSnapshot) -> None:
+            if failure_point == "store":
+                raise RuntimeError("store failed")
+            await super().async_save(snapshot)
+
+    class RecordingLogger(RedactedOperationalLogger):
+        def log_success(self, **kwargs: object) -> bool:
+            calls.append("log_success")
+            return True
+
+    async def projection(snapshot: MealPlanSnapshot) -> None:
+        if failure_point == "projection":
+            raise RuntimeError("projection failed")
+
+    async def fetch_source() -> str:
+        if failure_point == "fetch":
+            raise RuntimeError("fetch failed")
+        return RAW_HTML
+
+    def parse_source(source: str, *, fetched_at: str) -> list[MealEntry]:
+        if failure_point == "parse":
+            raise RuntimeError("parse failed")
+        return [_entry(fetched_at=fetched_at)]
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=fetch_source,
+        parse_source=parse_source,
+        store=MaybeFailingStore(),
+        clock=SequenceClock(FETCHED_AT),
+        operational_logger=RecordingLogger(),
+        snapshot_update_callback=projection,
+    )
+
+    if failure_point in ("fetch", "parse"):
+        snapshot = _run(coordinator.async_refresh())
+        assert snapshot.health.state == "unknown_error"
+    else:
+        with pytest.raises(RuntimeError, match=f"{failure_point} failed"):
+            _run(coordinator.async_refresh())
+
+    assert calls == []
+
+
+def test_success_logger_exception_does_not_fail_completed_refresh(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logger = logging.getLogger("speiseplan.test.success-logger-isolation")
+
+    class FailingSuccessLogger(RedactedOperationalLogger):
+        def log_success(self, **kwargs: object) -> bool:
+            raise RuntimeError("RAW_KITAFINO_HTML_CAPTURE logger secret")
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=_fetch_source,
+        parse_source=lambda source, *, fetched_at: [_entry(fetched_at=fetched_at)],
+        clock=SequenceClock(FETCHED_AT),
+        operational_logger=FailingSuccessLogger(logger=logger),
+    )
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        snapshot = _run(coordinator.async_refresh())
+
+    assert snapshot.health.state == "ok"
+    assert coordinator.snapshot is snapshot
+    assert "RAW_KITAFINO_HTML_CAPTURE" not in caplog.text
+    assert "logger secret" not in caplog.text
+
+
 def test_listener_failure_isolated_from_later_listeners_and_projection(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -203,6 +315,30 @@ def test_listener_failure_isolated_from_later_listeners_and_projection(
     assert "failure_class=unknown_error" in caplog.text
     assert "RAW_KITAFINO_HTML_CAPTURE" not in caplog.text
     assert "callback secret" not in caplog.text
+
+
+def test_listener_failure_prevents_success_log() -> None:
+    calls: list[str] = []
+
+    class RecordingLogger(RedactedOperationalLogger):
+        def log_success(self, **kwargs: object) -> bool:
+            calls.append("log_success")
+            return True
+
+    coordinator = SpeiseplanDataUpdateCoordinator(
+        fetch_source=_fetch_source,
+        parse_source=lambda source, *, fetched_at: [_entry(fetched_at=fetched_at)],
+        clock=SequenceClock(FETCHED_AT),
+        operational_logger=RecordingLogger(),
+    )
+
+    def failing_listener() -> None:
+        raise RuntimeError("listener failed")
+
+    coordinator.async_add_listener(failing_listener)
+    _run(coordinator.async_refresh())
+
+    assert calls == []
 
 
 def test_successful_refresh_stores_fresh_snapshot_and_sanitized_cache() -> None:
