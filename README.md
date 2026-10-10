@@ -4,13 +4,16 @@ Kitafino Meal Plan is a Home Assistant custom integration for showing Kitafino m
 
 ## Status
 
-Version `1.1.1` is prepared as the next stable HACS release. It provides:
+Version `1.2.0` is prepared as the next stable HACS release. It provides:
 
 - HACS custom repository installation
 - Home Assistant minimum version `2026.6.4`
 - Initial Home Assistant UI credential setup
 - One independently authenticated config entry and entity set per child
-- Update schedule, reauthentication, reconfiguration, and MQTT options
+- Reliable scheduled refresh at the configured Home Assistant local time
+- Immediate native entity updates after scheduled and manual refreshes
+- Rate-limited, privacy-safe success logging for operational visibility
+- Reauthentication, reconfiguration, and MQTT options
 - Legacy shared-source Current Week sensors remain compatible
 - Next Week support deferred until reliable Kitafino evidence exists
 - Secure handling of credentials, cookies, diagnostics, fixtures, and examples

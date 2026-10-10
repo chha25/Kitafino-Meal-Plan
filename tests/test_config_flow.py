@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import asyncio
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -70,22 +71,75 @@ def test_release_metadata_is_consistent() -> None:
     hacs = json.loads((ROOT / "hacs.json").read_text())
     version = manifest["version"]
     readme = (ROOT / "README.md").read_text()
+    readme_lower = readme.lower()
     changelog = (ROOT / "CHANGELOG.md").read_text()
 
-    assert version == "1.1.1"
+    assert version == "1.2.0"
     assert hacs["version"] == version
     assert f"Version `{version}` is prepared" in readme
-    assert changelog.index(f"## [{version}] - 2026-07-21") > changelog.index(
-        "## [Unreleased]"
+    unreleased_match = re.search(
+        r"^## \[Unreleased\]\s*(?P<body>.*?)(?=^## \[)",
+        changelog,
+        re.MULTILINE | re.DOTALL,
     )
-    assert (
-        f"[{version}]: https://github.com/chha25/Kitafino-Meal-Plan/"
-        f"releases/tag/v{version}"
-    ) in changelog
-    assert (
-        f"[Unreleased]: https://github.com/chha25/Kitafino-Meal-Plan/"
-        f"compare/v{version}...HEAD"
-    ) in changelog
+    assert unreleased_match is not None
+    assert unreleased_match.group("body").strip() == ""
+
+    release_order = re.findall(
+        r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}$",
+        changelog,
+        re.MULTILINE,
+    )
+    assert release_order == ["1.2.0", "1.1.1", "1.1.0", "1.0.0"]
+    assert f"## [{version}] - 2026-10-10" in changelog
+
+    historical_requirements = {
+        "1.1.1": ("Successful partial refreshes",),
+        "1.1.0": ("independently authenticated", "foreign"),
+        "1.0.0": ("HACS-compatible", "### Security", "Session cookies"),
+    }
+    for historical_version, required_content in historical_requirements.items():
+        section_match = re.search(
+            rf"^## \[{re.escape(historical_version)}\] - .*?\n"
+            rf"(?P<body>.*?)(?=^## \[|^\[Unreleased\]:)",
+            changelog,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert section_match is not None
+        section_body = section_match.group("body").strip()
+        assert section_body
+        for content in required_content:
+            assert content in section_body
+
+    assert "daily refresh" in changelog
+    assert "native Home Assistant entities" in changelog
+    assert "rate-limited" in changelog
+    assert "privacy-safe" in changelog
+    assert "reliable scheduled refresh" in readme_lower
+    assert "immediate native entity updates" in readme_lower
+    assert "rate-limited, privacy-safe success logging" in readme_lower
+
+    link_definitions = re.findall(
+        r"^\[([^]]+)\]:\s+(\S+)\s*$",
+        changelog,
+        re.MULTILINE,
+    )
+    expected_links = {
+        "Unreleased": (
+            "https://github.com/chha25/Kitafino-Meal-Plan/"
+            f"compare/v{version}...HEAD"
+        ),
+        **{
+            release: (
+                "https://github.com/chha25/Kitafino-Meal-Plan/"
+                f"releases/tag/v{release}"
+            )
+            for release in release_order
+        },
+    }
+    for label, expected_url in expected_links.items():
+        matching_urls = [url for candidate, url in link_definitions if candidate == label]
+        assert matching_urls == [expected_url]
 
 
 def test_user_schema_exposes_immutable_slug_and_credentials() -> None:

@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-10
+
+### Added
+
+- Successful refreshes now emit rate-limited, privacy-safe operational logs at most once per config entry and refresh phase per hour.
+
+### Fixed
+
+- The configured daily refresh now runs reliably at the selected Home Assistant local time.
+- Refreshed snapshots propagate immediately to native Home Assistant entities after scheduled and manual refreshes.
+
 ## [1.1.1] - 2026-07-21
 
 ### Fixed
@@ -62,7 +73,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Diagnostics, MQTT payloads, fixtures, and repository examples exclude raw HTML, account identifiers, and sensitive HTTP data.
 - Local investigation material under `.private/` is excluded from version control.
 
-[Unreleased]: https://github.com/chha25/Kitafino-Meal-Plan/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/chha25/Kitafino-Meal-Plan/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/chha25/Kitafino-Meal-Plan/releases/tag/v1.2.0
 [1.1.1]: https://github.com/chha25/Kitafino-Meal-Plan/releases/tag/v1.1.1
 [1.1.0]: https://github.com/chha25/Kitafino-Meal-Plan/releases/tag/v1.1.0
 [1.0.0]: https://github.com/chha25/Kitafino-Meal-Plan/releases/tag/v1.0.0
